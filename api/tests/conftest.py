@@ -18,5 +18,8 @@ os.environ.update(
         "BASETEN_API_KEY": "",
         "LLM_PROVIDER": "meta",
         "LLM_CACHE_DIR": f"{_tmp}/llm",
+        "REPORT_AGENT": "0",  # template texts; report tests switch the writer on with a fake LLM
+        "WEATHER": "0",  # no network in tests
+        "WEATHER_CACHE_DIR": f"{_tmp}/weather",
     }
 )

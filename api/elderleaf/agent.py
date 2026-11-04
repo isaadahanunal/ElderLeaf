@@ -143,3 +143,100 @@ def propose_prompts(llm: LLMClient, image: bytes, crop_label: str, days_after_pl
     if not parsed["crop_prompts"] and not parsed["weed_prompts"]:
         return Proposal([], [], parsed["scene"], parsed["crop_visible"], _combine(results), error="no usable phrases")
     return Proposal(**parsed, llm=_combine(results))
+
+
+# ------------------------------------------------------------------------------ scan mode
+# Instead of 3 ranked phrases per target, the agent lists one phrase per kind of plant it sees
+# (as many as the photo needs) and SAM searches all of them. Made for photos with several
+# crops and weed types; eval/mixed_scenes.py compares it with the ranked mode.
+
+MAX_SCAN_ITEMS = 8
+
+SCAN_TEMPLATE = """A beginner grower took this top-down photo of their plot. The grower says it grows: {crops}.
+List what SAM should search for so that every plant in this photo gets found, one entry per kind of plant that looks different:
+- each crop you can see: one entry, or two if its plants look clearly different (for example small seedlings and large plants);
+- each kind of weed you can see, as separate entries (for example grasses and broadleaf weeds).
+Use as many entries as this photo needs (at most {limit}) and only list plants you can actually see.
+Return:
+{{"scene": "<one short sentence about what you see, without numbers>",
+ "items": [{{"phrase": "<SAM phrase>", "kind": "crop", "crop": "<which crop: {crop_list}>"}},
+           {{"phrase": "<SAM phrase>", "kind": "weed"}}]}}
+Weed phrases must not also describe the crop plants: name what makes the weeds look different (for example grass blades or clover leaves)."""
+
+
+def _scan_crop(value: object, phrase: str, crops: list[str]) -> str | None:
+    """Which of the grower's crops an entry is about (None: a crop the grower did not name)."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip().lower()
+    if not crops:
+        return text or phrase
+    if text in crops:
+        return text
+    for crop in sorted(crops, key=len, reverse=True):  # "sugar beet" before "beet"
+        if crop in text or crop in phrase:
+            return crop
+    return crops[0] if len(crops) == 1 else None
+
+
+def parse_scan(text: str, crops: list[str], limit: int = MAX_SCAN_ITEMS) -> dict:
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        raise ValueError("no JSON object in the answer")
+    data = json.loads(match.group(0))
+    raw_items = data.get("items")
+    items: list[dict] = []
+    seen: set[str] = set()
+    for raw in raw_items if isinstance(raw_items, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        phrase = clean_phrase(raw.get("phrase", ""))
+        kind = str(raw.get("kind", "")).strip().lower()
+        if not phrase or phrase in seen or kind not in ("crop", "weed"):
+            continue
+        crop = _scan_crop(raw.get("crop"), phrase, crops) if kind == "crop" else None
+        if kind == "crop" and crop is None:
+            continue
+        seen.add(phrase)
+        items.append({"phrase": phrase, "kind": kind, "crop": crop})
+    scene = data.get("scene")
+    return {"items": items[:limit], "scene": scene.strip() if isinstance(scene, str) and scene.strip() else None}
+
+
+@dataclass
+class Scan:
+    items: list[dict]  # {"phrase", "kind": "crop" | "weed", "crop": crop name or None}
+    scene: str | None
+    llm: LLMResult | None
+    error: str | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def scan_plants(llm: LLMClient, image: bytes, crops: list[str], limit: int = MAX_SCAN_ITEMS) -> Scan:
+    names = [c.lower() for c in crops]
+    prompt = SCAN_TEMPLATE.format(
+        crops=", ".join(names) or "not told",
+        crop_list=" or ".join(f'"{c}"' for c in names) or "its common name",
+        limit=limit,
+    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": [{"type": "text", "text": prompt}, image_part(_llm_image(image))]},
+    ]
+    results: list[LLMResult] = []
+    try:
+        results.append(llm.chat(messages))
+        try:
+            parsed = parse_scan(results[-1].text, names, limit)
+        except (ValueError, json.JSONDecodeError):
+            messages += [
+                {"role": "assistant", "content": results[-1].text},
+                {"role": "user", "content": "That was not a valid JSON object. Reply with the JSON object only."},
+            ]
+            results.append(llm.chat(messages))
+            parsed = parse_scan(results[-1].text, names, limit)
+    except Exception as exc:
+        return Scan([], None, _combine(results) if results else None, error=f"{type(exc).__name__}: {exc}")
+    if not parsed["items"]:
+        return Scan([], parsed["scene"], _combine(results), error="no usable phrases")
+    return Scan(parsed["items"], parsed["scene"], _combine(results))

@@ -1,0 +1,13 @@
+{
+  "_source": "FAO Irrigation and Drainage Paper 56 (Allen et al., 1998). Kc: Table 12 (single crop coefficients). Stage lengths in days (initial, development, mid-season, late): Table 11, one typical planting per crop; local seasons differ.",
+  "sugar_beet": {"kc": {"ini": 0.35, "mid": 1.2, "end": 0.7}, "stages_days": [25, 35, 50, 50], "stages_note": "May sowing, Mediterranean"},
+  "lettuce": {"kc": {"ini": 0.7, "mid": 1.0, "end": 0.95}, "stages_days": [20, 30, 15, 10], "stages_note": "April planting, Mediterranean"},
+  "spinach": {"kc": {"ini": 0.7, "mid": 1.0, "end": 0.95}, "stages_days": [20, 20, 15, 5], "stages_note": "April or Sep-Oct planting, Mediterranean"},
+  "cabbage": {"kc": {"ini": 0.7, "mid": 1.05, "end": 0.95}, "stages_days": [40, 60, 50, 15], "stages_note": "September planting, California desert"},
+  "onion": {"kc": {"ini": 0.7, "mid": 1.05, "end": 0.75}, "stages_days": [15, 25, 70, 40], "stages_note": "dry onion, April planting, Mediterranean"},
+  "garlic": {"kc": {"ini": 0.7, "mid": 1.0, "end": 0.7}, "stages_days": null, "stages_note": "no stage lengths in Table 11"},
+  "broad_bean": {"kc": {"ini": 0.5, "mid": 1.15, "end": 1.1}, "stages_days": [15, 25, 35, 15], "stages_note": "fresh beans, May sowing, Europe"},
+  "tomato": {"kc": {"ini": 0.6, "mid": 1.15, "end": 0.8}, "stages_days": [30, 40, 45, 30], "stages_note": "April-May planting, Mediterranean; Kc end 0.70-0.90 in Table 12"},
+  "pepper": {"kc": {"ini": 0.6, "mid": 1.05, "end": 0.9}, "stages_days": [25, 35, 40, 20], "stages_note": "sweet pepper, April-June planting, Europe and Mediterranean"},
+  "wheat": {"kc": {"ini": 0.3, "mid": 1.15, "end": 0.3}, "stages_days": [15, 25, 50, 30], "stages_note": "spring wheat, March-April sowing, 35-45 N; Kc end 0.25-0.4 in Table 12"}
+}
