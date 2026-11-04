@@ -1,0 +1,196 @@
+{
+  "threshold": 0.5,
+  "prompts": [
+    {
+      "prompt": "crop plant",
+      "target": "crop",
+      "threshold": 0.5,
+      "gt": 555,
+      "pred": 0,
+      "tp": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "mean_iou_tp": 0.0,
+      "count_mae": 9.25,
+      "count_bias": -9.25,
+      "fp_other_class": 0
+    },
+    {
+      "prompt": "sugar beet plant",
+      "target": "crop",
+      "threshold": 0.5,
+      "gt": 555,
+      "pred": 354,
+      "tp": 283,
+      "precision": 0.7994350282485876,
+      "recall": 0.5099099099099099,
+      "f1": 0.6226622662266227,
+      "mean_iou_tp": 0.8205398817654665,
+      "count_mae": 3.5166666666666666,
+      "count_bias": -3.35,
+      "fp_other_class": 33
+    },
+    {
+      "prompt": "weed",
+      "target": "weed",
+      "threshold": 0.5,
+      "gt": 363,
+      "pred": 371,
+      "tp": 61,
+      "precision": 0.16442048517520216,
+      "recall": 0.16804407713498623,
+      "f1": 0.16621253405994552,
+      "mean_iou_tp": 0.6761694769411167,
+      "count_mae": 4.433333333333334,
+      "count_bias": 0.13333333333333333,
+      "fp_other_class": 234
+    },
+    {
+      "prompt": "plant",
+      "target": "plant",
+      "threshold": 0.5,
+      "gt": 918,
+      "pred": 596,
+      "tp": 485,
+      "precision": 0.8137583892617449,
+      "recall": 0.528322440087146,
+      "f1": 0.6406869220607662,
+      "mean_iou_tp": 0.7786173587946648,
+      "count_mae": 5.366666666666666,
+      "count_bias": -5.366666666666666,
+      "fp_other_class": 0
+    },
+    {
+      "prompt": "leaf",
+      "target": "leaf",
+      "threshold": 0.5,
+      "gt": 3345,
+      "pred": 2117,
+      "tp": 1882,
+      "precision": 0.8889938592347661,
+      "recall": 0.5626307922272048,
+      "f1": 0.6891248626876603,
+      "mean_iou_tp": 0.839072560382734,
+      "count_mae": 21.166666666666668,
+      "count_bias": -20.466666666666665,
+      "fp_other_class": 0
+    }
+  ],
+  "best_threshold": {
+    "crop plant": {
+      "prompt": "crop plant",
+      "target": "crop",
+      "threshold": 0.9,
+      "gt": 555,
+      "pred": 0,
+      "tp": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "mean_iou_tp": 0.0,
+      "count_mae": 9.25,
+      "count_bias": -9.25,
+      "fp_other_class": 0
+    },
+    "sugar beet plant": {
+      "prompt": "sugar beet plant",
+      "target": "crop",
+      "threshold": 0.5,
+      "gt": 555,
+      "pred": 354,
+      "tp": 283,
+      "precision": 0.7994350282485876,
+      "recall": 0.5099099099099099,
+      "f1": 0.6226622662266227,
+      "mean_iou_tp": 0.8205398817654665,
+      "count_mae": 3.5166666666666666,
+      "count_bias": -3.35,
+      "fp_other_class": 33
+    },
+    "weed": {
+      "prompt": "weed",
+      "target": "weed",
+      "threshold": 0.5,
+      "gt": 363,
+      "pred": 371,
+      "tp": 61,
+      "precision": 0.16442048517520216,
+      "recall": 0.16804407713498623,
+      "f1": 0.16621253405994552,
+      "mean_iou_tp": 0.6761694769411167,
+      "count_mae": 4.433333333333334,
+      "count_bias": 0.13333333333333333,
+      "fp_other_class": 234
+    },
+    "plant": {
+      "prompt": "plant",
+      "target": "plant",
+      "threshold": 0.5,
+      "gt": 918,
+      "pred": 596,
+      "tp": 485,
+      "precision": 0.8137583892617449,
+      "recall": 0.528322440087146,
+      "f1": 0.6406869220607662,
+      "mean_iou_tp": 0.7786173587946648,
+      "count_mae": 5.366666666666666,
+      "count_bias": -5.366666666666666,
+      "fp_other_class": 0
+    },
+    "leaf": {
+      "prompt": "leaf",
+      "target": "leaf",
+      "threshold": 0.5,
+      "gt": 3345,
+      "pred": 2117,
+      "tp": 1882,
+      "precision": 0.8889938592347661,
+      "recall": 0.5626307922272048,
+      "f1": 0.6891248626876603,
+      "mean_iou_tp": 0.839072560382734,
+      "count_mae": 21.166666666666668,
+      "count_bias": -20.466666666666665,
+      "fp_other_class": 0
+    }
+  },
+  "product": {
+    "crop plant + weed": {
+      "images": 60,
+      "canopy_mae_pts": 12.488520940144857,
+      "count_mae": 9.25,
+      "count_bias": -9.25,
+      "weed_share_mae_pts": 60.512964273572976,
+      "iou_veg": 0.25696338071248565,
+      "iou_crop": 0.0,
+      "iou_weed": 0.048684092034760686
+    },
+    "sugar beet plant + weed": {
+      "images": 60,
+      "canopy_mae_pts": 0.8616479237874349,
+      "count_mae": 3.5166666666666666,
+      "count_bias": -3.35,
+      "weed_share_mae_pts": 5.9601389675361895,
+      "iou_veg": 0.8833142652697339,
+      "iou_crop": 0.8742398077760514,
+      "iou_weed": 0.09556555699861359
+    },
+    "leaf (all leaves)": {
+      "images": 60,
+      "canopy_mae_pts": 1.6872104008992512,
+      "iou_crop": 0.8131357707120014
+    },
+    "leaf \u2229 crop plant": {
+      "images": 60,
+      "canopy_mae_pts": 12.488520940144857,
+      "iou_crop": 0.0
+    },
+    "plant (all green vs GT crop+weed)": {
+      "images": 60,
+      "canopy_mae_pts": 0.6914456685384115,
+      "count_mae": 5.466666666666667,
+      "count_bias": -5.466666666666667,
+      "iou_veg": 0.8892416388401839
+    }
+  }
+}
