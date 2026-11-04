@@ -71,6 +71,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/
 
 # PyBuilder
 .pybuilder/
@@ -218,3 +219,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ElderLeaf
+data/
+eval/.cache/
+eval/results/*/viz/
+.cache/
+
+.data/
+eval/results/*/gallery/
+api/sam_outputs/

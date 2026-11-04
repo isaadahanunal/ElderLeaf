@@ -1,0 +1,19 @@
+image,date,system,leaf_prompt,leaf_rank,leaf_tp,leaf_fp,leaf_fn,kept,on_weed,sam_calls,sam_cost_usd,latency_s
+05-15_00184_P0030859.png,05-15,"fixed ""leaf""",leaf,,16,3,15,19,2,1,0.0025,3.018
+05-15_00184_P0030859.png,05-15,"fixed ""sugar beet leaf""",sugar beet leaf,,0,0,31,0,0,1,0.0025,3.605
+05-15_00184_P0030859.png,05-15,agent (baseten),leaf,fallback,16,3,15,19,2,4,0.01,12.893
+05-15_00284_P0030695.png,05-15,"fixed ""leaf""",leaf,,15,0,14,15,0,1,0.0025,5.169
+05-15_00284_P0030695.png,05-15,"fixed ""sugar beet leaf""",sugar beet leaf,,0,0,29,0,0,1,0.0025,3.415
+05-15_00284_P0030695.png,05-15,agent (baseten),leaf,fallback,15,0,14,15,0,4,0.01,15.965
+05-26_00056_P0034282.png,05-26,"fixed ""leaf""",leaf,,29,0,17,29,0,1,0.0025,4.404
+05-26_00056_P0034282.png,05-26,"fixed ""sugar beet leaf""",sugar beet leaf,,0,1,46,1,0,1,0.0025,2.779
+05-26_00056_P0034282.png,05-26,agent (baseten),sugar beet leaf,1,0,1,46,1,0,1,0.0025,2.779
+05-26_00193_P0034121.png,05-26,"fixed ""leaf""",leaf,,27,0,22,27,0,1,0.0025,5.261
+05-26_00193_P0034121.png,05-26,"fixed ""sugar beet leaf""",sugar beet leaf,,0,0,49,0,0,1,0.0025,4.822
+05-26_00193_P0034121.png,05-26,agent (baseten),young beet leaf,2,1,12,48,13,0,2,0.005,7.7940000000000005
+06-05_00087_P0037822.png,06-05,"fixed ""leaf""",leaf,,54,4,41,58,3,1,0.0025,3.325
+06-05_00087_P0037822.png,06-05,"fixed ""sugar beet leaf""",sugar beet leaf,,0,0,95,0,0,1,0.0025,1.961
+06-05_00087_P0037822.png,06-05,agent (baseten),ruffled green leaf,3,22,0,73,22,0,3,0.0075,8.42
+06-05_00132_P0037822.png,06-05,"fixed ""leaf""",leaf,,37,4,15,41,3,1,0.0025,4.949
+06-05_00132_P0037822.png,06-05,"fixed ""sugar beet leaf""",sugar beet leaf,,1,6,51,7,0,1,0.0025,2.033
+06-05_00132_P0037822.png,06-05,agent (baseten),sugar beet leaf,1,1,6,51,7,0,1,0.0025,2.033

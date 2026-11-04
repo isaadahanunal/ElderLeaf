@@ -1,0 +1,236 @@
+{
+  "threshold": 0.5,
+  "prompts": [
+    {
+      "prompt": "crop plant",
+      "target": "crop",
+      "threshold": 0.5,
+      "gt": 55,
+      "pred": 0,
+      "tp": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "mean_iou_tp": 0.0,
+      "count_mae": 9.166666666666666,
+      "count_bias": -9.166666666666666,
+      "fp_other_class": 0
+    },
+    {
+      "prompt": "sugar beet plant",
+      "target": "crop",
+      "threshold": 0.5,
+      "gt": 55,
+      "pred": 30,
+      "tp": 24,
+      "precision": 0.8,
+      "recall": 0.43636363636363634,
+      "f1": 0.5647058823529413,
+      "mean_iou_tp": 0.8401270717938677,
+      "count_mae": 4.5,
+      "count_bias": -4.166666666666667,
+      "fp_other_class": 2
+    },
+    {
+      "prompt": "weed",
+      "target": "weed",
+      "threshold": 0.5,
+      "gt": 31,
+      "pred": 50,
+      "tp": 10,
+      "precision": 0.2,
+      "recall": 0.3225806451612903,
+      "f1": 0.24691358024691357,
+      "mean_iou_tp": 0.7299785153077003,
+      "count_mae": 5.833333333333333,
+      "count_bias": 3.1666666666666665,
+      "fp_other_class": 29
+    },
+    {
+      "prompt": "plant",
+      "target": "plant",
+      "threshold": 0.5,
+      "gt": 86,
+      "pred": 60,
+      "tp": 48,
+      "precision": 0.8,
+      "recall": 0.5581395348837209,
+      "f1": 0.6575342465753425,
+      "mean_iou_tp": 0.7900367887836505,
+      "count_mae": 4.333333333333333,
+      "count_bias": -4.333333333333333,
+      "fp_other_class": 0
+    },
+    {
+      "prompt": "leaf",
+      "target": "leaf",
+      "threshold": 0.5,
+      "gt": 302,
+      "pred": 189,
+      "tp": 178,
+      "precision": 0.9417989417989417,
+      "recall": 0.5894039735099338,
+      "f1": 0.725050916496945,
+      "mean_iou_tp": 0.8228155580552713,
+      "count_mae": 18.833333333333332,
+      "count_bias": -18.833333333333332,
+      "fp_other_class": 0
+    },
+    {
+      "prompt": "sugar beet leaf",
+      "target": "leaf",
+      "threshold": 0.5,
+      "gt": 302,
+      "pred": 8,
+      "tp": 1,
+      "precision": 0.125,
+      "recall": 0.0033112582781456954,
+      "f1": 0.006451612903225807,
+      "mean_iou_tp": 0.9687774846086191,
+      "count_mae": 49.0,
+      "count_bias": -49.0,
+      "fp_other_class": 0
+    }
+  ],
+  "best_threshold": {
+    "crop plant": {
+      "prompt": "crop plant",
+      "target": "crop",
+      "threshold": 0.0,
+      "gt": 55,
+      "pred": 0,
+      "tp": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "mean_iou_tp": 0.0,
+      "count_mae": 9.166666666666666,
+      "count_bias": -9.166666666666666,
+      "fp_other_class": 0
+    },
+    "sugar beet plant": {
+      "prompt": "sugar beet plant",
+      "target": "crop",
+      "threshold": 0.0,
+      "gt": 55,
+      "pred": 30,
+      "tp": 24,
+      "precision": 0.8,
+      "recall": 0.43636363636363634,
+      "f1": 0.5647058823529413,
+      "mean_iou_tp": 0.8401270717938677,
+      "count_mae": 4.5,
+      "count_bias": -4.166666666666667,
+      "fp_other_class": 2
+    },
+    "weed": {
+      "prompt": "weed",
+      "target": "weed",
+      "threshold": 0.0,
+      "gt": 31,
+      "pred": 50,
+      "tp": 10,
+      "precision": 0.2,
+      "recall": 0.3225806451612903,
+      "f1": 0.24691358024691357,
+      "mean_iou_tp": 0.7299785153077003,
+      "count_mae": 5.833333333333333,
+      "count_bias": 3.1666666666666665,
+      "fp_other_class": 29
+    },
+    "plant": {
+      "prompt": "plant",
+      "target": "plant",
+      "threshold": 0.0,
+      "gt": 86,
+      "pred": 60,
+      "tp": 48,
+      "precision": 0.8,
+      "recall": 0.5581395348837209,
+      "f1": 0.6575342465753425,
+      "mean_iou_tp": 0.7900367887836505,
+      "count_mae": 4.333333333333333,
+      "count_bias": -4.333333333333333,
+      "fp_other_class": 0
+    },
+    "leaf": {
+      "prompt": "leaf",
+      "target": "leaf",
+      "threshold": 0.0,
+      "gt": 302,
+      "pred": 189,
+      "tp": 178,
+      "precision": 0.9417989417989417,
+      "recall": 0.5894039735099338,
+      "f1": 0.725050916496945,
+      "mean_iou_tp": 0.8228155580552713,
+      "count_mae": 18.833333333333332,
+      "count_bias": -18.833333333333332,
+      "fp_other_class": 0
+    },
+    "sugar beet leaf": {
+      "prompt": "sugar beet leaf",
+      "target": "leaf",
+      "threshold": 0.0,
+      "gt": 302,
+      "pred": 8,
+      "tp": 1,
+      "precision": 0.125,
+      "recall": 0.0033112582781456954,
+      "f1": 0.006451612903225807,
+      "mean_iou_tp": 0.9687774846086191,
+      "count_mae": 49.0,
+      "count_bias": -49.0,
+      "fp_other_class": 0
+    }
+  },
+  "product": {
+    "crop plant + weed": {
+      "images": 6,
+      "canopy_mae_pts": 9.298022588094076,
+      "count_mae": 9.166666666666666,
+      "count_bias": -9.166666666666666,
+      "weed_share_mae_pts": 81.4534393672697,
+      "iou_veg": 0.4098017831296143,
+      "iou_crop": 0.0,
+      "iou_weed": 0.027472422853806217
+    },
+    "sugar beet plant + weed": {
+      "images": 6,
+      "canopy_mae_pts": 0.7034460703531901,
+      "count_mae": 4.5,
+      "count_bias": -4.166666666666667,
+      "weed_share_mae_pts": 6.641598310522787,
+      "iou_veg": 0.8740962686025301,
+      "iou_crop": 0.8472394289507413,
+      "iou_weed": 0.17329873125720877
+    },
+    "leaf (all leaves)": {
+      "images": 6,
+      "canopy_mae_pts": 1.073773701985677,
+      "iou_crop": 0.8264092300759454
+    },
+    "leaf \u2229 crop plant": {
+      "images": 6,
+      "canopy_mae_pts": 9.298022588094076,
+      "iou_crop": 0.0
+    },
+    "sugar beet leaf (all leaves)": {
+      "images": 6,
+      "canopy_mae_pts": 6.7932923634847,
+      "iou_crop": 0.26638778519297235
+    },
+    "sugar beet leaf \u2229 crop plant": {
+      "images": 6,
+      "canopy_mae_pts": 9.298022588094076,
+      "iou_crop": 0.0
+    },
+    "plant (all green vs GT crop+weed)": {
+      "images": 6,
+      "canopy_mae_pts": 2.0301024119059243,
+      "count_mae": 4.333333333333333,
+      "count_bias": -4.333333333333333,
+      "iou_veg": 0.7368714134416091
+    }
+  }
+}

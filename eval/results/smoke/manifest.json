@@ -1,0 +1,24 @@
+{
+  "dataset": "PhenoBench",
+  "data_root": "data/PhenoBench",
+  "split": "val",
+  "seed": 0,
+  "per_date": 20,
+  "images": [
+    "05-15_00184_P0030859.png",
+    "05-15_00284_P0030695.png",
+    "05-26_00056_P0034282.png",
+    "05-26_00193_P0034121.png",
+    "06-05_00087_P0037822.png",
+    "06-05_00132_P0037822.png"
+  ],
+  "prompts": {
+    "crop plant": "crop",
+    "sugar beet plant": "crop",
+    "weed": "weed",
+    "plant": "plant",
+    "leaf": "leaf",
+    "sugar beet leaf": "leaf"
+  },
+  "model": "sam-3.1"
+}

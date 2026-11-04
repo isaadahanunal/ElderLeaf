@@ -1,0 +1,13 @@
+{
+  "sugar_beet": {"label": "Sugar beet", "sam_prompt": "sugar beet plant"},
+  "lettuce": {"label": "Lettuce", "sam_prompt": "lettuce plant"},
+  "spinach": {"label": "Spinach", "sam_prompt": "spinach plant"},
+  "cabbage": {"label": "Cabbage", "sam_prompt": "cabbage plant"},
+  "onion": {"label": "Onion", "sam_prompt": "onion plant"},
+  "garlic": {"label": "Garlic", "sam_prompt": "garlic plant"},
+  "broad_bean": {"label": "Broad bean", "sam_prompt": "broad bean plant"},
+  "tomato": {"label": "Tomato", "sam_prompt": "tomato plant"},
+  "pepper": {"label": "Pepper", "sam_prompt": "pepper plant"},
+  "wheat": {"label": "Wheat", "sam_prompt": "wheat plant"},
+  "other": {"label": "Other", "sam_prompt": "plant"}
+}
