@@ -8,12 +8,20 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { IconBook, IconCamera, IconChevronRight, IconClose, IconGrid, IconHome, IconPlus, IconSettings, IconSprout, IconSun, IconUser } from "./icons";
 import { Avatar } from "./ui";
 
-export const PLOTS_CHANGED = "elderleaf:plots-changed";
-const OPEN_CAPTURE = "elderleaf:open-capture";
+import { NewPlotForm } from "@/app/new/NewPlotView";
+import { BACK_EVENT as BACK, OPEN_CAPTURE, OPEN_NEW_PLOT, PLOTS_CHANGED } from "@/lib/events";
+import { Sheet } from "./Sheet";
 
-/** Opens the "which plot are you photographing?" sheet (bottom tab camera button, home hero). */
-export function openCaptureSheet() {
-  window.dispatchEvent(new Event(OPEN_CAPTURE));
+export { PLOTS_CHANGED };
+
+/** Opens the "which plot?" sheet (bottom tab camera button, home hero, guide), for a photo or a row video. */
+export function openCaptureSheet(mode: "photo" | "video" = "photo") {
+  window.dispatchEvent(new CustomEvent(OPEN_CAPTURE, { detail: { mode } }));
+}
+
+/** Opens the "New plot" sheet from anywhere. */
+export function openNewPlotSheet() {
+  window.dispatchEvent(new Event(OPEN_NEW_PLOT));
 }
 
 // The first time the app opens it greets you with the sign-in screen; after you sign in, sign up or
@@ -63,7 +71,6 @@ function Logo({ dark = false }: { dark?: boolean }) {
   );
 }
 
-const BACK = "elderleaf:back";
 
 type CapApp = {
   addListener: (event: "backButton", cb: (e: { canGoBack: boolean }) => void) => Promise<{ remove: () => void }>;
@@ -131,6 +138,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <TabBar />
       </Suspense>
       <CaptureSheet />
+      <NewPlotSheet />
     </div>
     )}
     </AuthProvider>
@@ -172,7 +180,7 @@ function TabBar() {
           <div className="flex flex-1 justify-center">
             <button
               type="button"
-              onClick={openCaptureSheet}
+              onClick={() => openCaptureSheet()}
               aria-label="Analyze a plot"
               className="-mt-9 grid h-[62px] w-[62px] place-items-center rounded-full bg-gradient-to-br from-brand to-forest text-[#f6efe2] shadow-[var(--shadow-lift)] ring-4 ring-canvas transition active:scale-95"
             >
@@ -192,10 +200,12 @@ function TabBar() {
 function CaptureSheet() {
   const [open, setOpen] = useState(false);
   const [plots, setPlots] = useState<Plot[] | null>(null);
+  const [mode, setMode] = useState<"photo" | "video">("photo");
   const pathname = usePathname();
 
   useEffect(() => {
-    const show = () => {
+    const show = (e: Event) => {
+      setMode((e as CustomEvent<{ mode?: "photo" | "video" }>).detail?.mode === "video" ? "video" : "photo");
       setOpen(true);
       api.plots().then(
         (all) => setPlots(all.filter((p) => !p.is_demo)),
@@ -230,7 +240,7 @@ function CaptureSheet() {
         <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-line sm:hidden" />
         <div className="flex items-center justify-between">
           <div>
-            <div className="font-display text-[22px] font-semibold">Which plot?</div>
+            <div className="font-display text-[22px] font-semibold">{mode === "video" ? "Film a row in which plot?" : "Which plot?"}</div>
             <div className="text-[13px] text-muted">Pick the plot you are standing at.</div>
           </div>
           <button onClick={() => setOpen(false)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-full bg-well text-ink-2">
@@ -247,7 +257,7 @@ function CaptureSheet() {
             </div>
           )}
           {plots?.map((p) => (
-            <Link key={p.id} href={`/analyze?plot=${p.id}`} className="flex items-center gap-3 rounded-2xl bg-well p-2.5 pr-3.5 transition hover:bg-[#ece9e1] active:scale-[0.99]">
+            <Link key={p.id} href={`/analyze?plot=${p.id}${mode === "video" ? "&mode=video" : ""}`} className="flex items-center gap-3 rounded-2xl bg-well p-2.5 pr-3.5 transition hover:bg-[#ece9e1] active:scale-[0.99]">
               <span className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-line">
                 {p.latest && (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -266,11 +276,32 @@ function CaptureSheet() {
           ))}
         </div>
 
-        <Link href="/new" className="mt-4 flex h-12 items-center justify-center gap-2 rounded-full bg-brand text-[15px] font-semibold text-white active:scale-[0.99]">
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            openNewPlotSheet();
+          }}
+          className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-brand text-[15px] font-semibold text-white active:scale-[0.99]"
+        >
           <IconPlus size={17} strokeWidth={2.4} /> New plot
-        </Link>
+        </button>
       </div>
     </div>
+  );
+}
+
+function NewPlotSheet() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener(OPEN_NEW_PLOT, show);
+    return () => window.removeEventListener(OPEN_NEW_PLOT, show);
+  }, []);
+  return (
+    <Sheet open={open} onClose={() => setOpen(false)} title="New plot" subtitle="A bed, a row or a whole garden">
+      {open && <NewPlotForm bare onCancel={() => setOpen(false)} onDone={() => setOpen(false)} />}
+    </Sheet>
   );
 }
 
@@ -309,7 +340,7 @@ function SideNav() {
     <>
       <button
         type="button"
-        onClick={openCaptureSheet}
+        onClick={() => openCaptureSheet()}
         className="mt-7 flex h-11 items-center justify-center gap-2 rounded-full bg-gold text-[14px] font-semibold text-forest shadow-lg transition hover:brightness-105 active:scale-[0.99]"
       >
         <IconCamera size={17} /> Analyze a plot

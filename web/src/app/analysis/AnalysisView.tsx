@@ -6,9 +6,10 @@ import { AnalysisOut, AnalysisResult, api, fmt, fmtDate, isNativeApp, MaskOut, P
 import { LayerToggles, MaskOverlay } from "@/components/MaskOverlay";
 import { AssistantCard, CoverCard, HealthCard, PlantsCard, SizeCard, SpotsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
 import { RowVideo } from "@/components/RowVideo";
+import { ShareResult } from "@/components/ShareResult";
 import { AgentSteps } from "@/components/Trace";
 import { IconDownload, IconSparkle, IconSprout } from "@/components/icons";
-import { BackLink, Button, Card, Chip, ErrorBox, InfoTip, LinkButton, Notice, PageHead, SegmenterNotice, Skeleton, Spinner } from "@/components/ui";
+import { BackLink, Button, Card, Chip, CountUp, ErrorBox, InfoTip, LinkButton, Notice, SegmenterNotice, Skeleton, Spinner } from "@/components/ui";
 
 export function AnalysisView() {
   const id = useSearchParams().get("id") ?? "";
@@ -56,43 +57,39 @@ export function AnalysisView() {
 
   const r = a?.result;
   const stats = r?.run_stats;
+  const vstats = a?.video_result?.run_stats;
+  const tech = [
+    r?.segmenter ?? a?.video_result?.segmenter,
+    stats ? `${stats.sam_calls} SAM calls` : vstats?.sam_calls !== undefined ? `${vstats.sam_calls} SAM calls` : null,
+    stats ? `$${(stats.total_cost_usd ?? stats.sam_cost_usd).toFixed(3)}` : vstats?.sam_cost_usd !== undefined ? `$${vstats.sam_cost_usd.toFixed(3)}` : null,
+    stats ? `${stats.wall_time_s.toFixed(0)} s` : vstats?.wall_time_s !== undefined ? `${vstats.wall_time_s.toFixed(0)} s` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const json =
+    a?.status === "done" && r ? (
+      isNativeApp() ? (
+        // the Android WebView can't save a blob, so the system browser opens the JSON instead
+        <LinkButton href={api.analysisJsonUrl(a.id)} external variant="secondary" size="sm">
+          <IconDownload size={14} /> JSON
+        </LinkButton>
+      ) : (
+        <Button variant="secondary" size="sm" onClick={() => downloadJson(r)}>
+          <IconDownload size={14} /> JSON
+        </Button>
+      )
+    ) : null;
   return (
     <>
-      <BackLink href={a ? `/plot?id=${a.plot_id}` : "/"} label={plot?.name ?? "Back"} />
-      <PageHead
-        title={a?.mode === "video" ? "Row count" : "Photo analysis"}
-        chips={
-          a && (
-            <>
-              <Chip tone="brand">{fmtDate(a.captured_at)}</Chip>
-              {(r?.segmenter ?? a.video_result?.segmenter) && <Chip>{r?.segmenter ?? a.video_result?.segmenter}</Chip>}
-              {stats && <Chip>{stats.sam_calls} SAM calls</Chip>}
-              {stats && <Chip>{stats.total_cost_usd !== null ? `$${stats.total_cost_usd.toFixed(3)}` : `$${stats.sam_cost_usd.toFixed(3)}`}</Chip>}
-              {stats && <Chip>{stats.wall_time_s.toFixed(0)} s</Chip>}
-            </>
-          )
-        }
-        actions={
-          a?.status === "done" && (
-            <>
-              {r &&
-                (isNativeApp() ? (
-                  // the Android WebView can't save a blob, so the system browser opens the JSON instead
-                  <LinkButton href={api.analysisJsonUrl(a.id)} external variant="white">
-                    <IconDownload size={16} /> JSON
-                  </LinkButton>
-                ) : (
-                  <Button variant="white" onClick={() => downloadJson(r)}>
-                    <IconDownload size={16} /> JSON
-                  </Button>
-                ))}
-              <LinkButton href={`/plot?id=${a.plot_id}`} variant="white">
-                Open plot
-              </LinkButton>
-            </>
-          )
-        }
-      />
+      <BackLink href={a ? `/plot?id=${a.plot_id}` : "/"} label="Back to plot" />
+      <div className="mb-6">
+        <div className="text-[13px] font-semibold uppercase tracking-[0.14em] text-[#8a6a35]">
+          {a ? `${a.mode === "video" ? "Row count" : "Photo"} · ${fmtDate(a.captured_at)}` : "\u00a0"}
+        </div>
+        <h1 className="font-display mt-1 line-clamp-2 text-[32px] font-semibold leading-[1.08] sm:text-[36px]">
+          {plot?.name ?? (a?.mode === "video" ? "Row count" : "Photo analysis")}
+        </h1>
+      </div>
       {error && <ErrorBox message={error} />}
       {!a && !error && <Skeleton className="h-96" />}
       {a && (a.status === "pending" || a.status === "running") && <Running a={a} />}
@@ -102,8 +99,8 @@ export function AnalysisView() {
           <AgentSteps steps={a.trace} live />
         </div>
       )}
-      {a?.status === "done" && r && <PhotoResult a={a} r={r} plot={plot} />}
-      {a?.status === "done" && a.video_result && a.video_url && <VideoDone a={a} />}
+      {a?.status === "done" && r && <PhotoResult a={a} r={r} plot={plot} tech={tech} json={json} />}
+      {a?.status === "done" && a.video_result && a.video_url && <VideoDone a={a} tech={tech} />}
     </>
   );
 }
@@ -141,7 +138,7 @@ function Running({ a }: { a: AnalysisOut }) {
 
 // ------------------------------------------------------------------ photo
 
-function PhotoResult({ a, r, plot }: { a: AnalysisOut; r: AnalysisResult; plot: PlotDetail | null }) {
+function PhotoResult({ a, r, plot, tech, json }: { a: AnalysisOut; r: AnalysisResult; plot: PlotDetail | null; tech: string; json: React.ReactNode }) {
   const counts = useMemo(() => {
     const c: Record<string, number> = { crop: 0, weed: 0 };
     for (const m of r.masks) c[m.class] = (c[m.class] ?? 0) + 1;
@@ -195,6 +192,16 @@ function PhotoResult({ a, r, plot }: { a: AnalysisOut; r: AnalysisResult; plot: 
                 setHighlight(mask ? new Set([mask.id]) : new Set());
               }}
             />
+            <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2.5 rounded-2xl bg-[#0c1511]/70 py-2 pl-3.5 pr-4 text-white shadow-lg backdrop-blur">
+              <span className="tabular text-[30px] font-bold leading-none">
+                <CountUp value={m.plant_count.value ?? 0} />
+              </span>
+              <span className="text-[11px] font-semibold leading-tight text-white/80">
+                plants
+                <br />
+                found
+              </span>
+            </div>
             {selected && (
               <div className="fade-in absolute bottom-3 left-3 right-3 flex items-center gap-3 rounded-2xl bg-white/95 px-4 py-2.5 text-[13px] shadow-lg backdrop-blur sm:right-auto">
                 <span className="font-mono font-semibold">{selected.id}</span>
@@ -207,6 +214,9 @@ function PhotoResult({ a, r, plot }: { a: AnalysisOut; r: AnalysisResult; plot: 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <LayerToggles counts={counts} visible={visible} onToggle={toggle} />
             <span className="text-xs text-muted">Tap a plant to inspect its mask</span>
+          </div>
+          <div className="mt-4">
+            <ShareResult a={a} r={r} plot={plot} />
           </div>
         </div>
         {r.summary ? <AssistantCard s={r.summary} consult={r.health.consult_agronomist} /> : <div />}
@@ -293,7 +303,7 @@ function PhotoResult({ a, r, plot }: { a: AnalysisOut; r: AnalysisResult; plot: 
         )}
       </div>
 
-      <AgentSteps steps={a.trace} scene={r.run_stats?.scene ?? null} />
+      <AgentSteps steps={a.trace} scene={r.run_stats?.scene ?? null} meta={tech} actions={json} />
     </div>
   );
 }
@@ -310,7 +320,7 @@ function downloadJson(r: AnalysisResult) {
 
 // ------------------------------------------------------------------ video
 
-function VideoDone({ a }: { a: AnalysisOut }) {
+function VideoDone({ a, tech }: { a: AnalysisOut; tech: string }) {
   const v = a.video_result!;
   return (
     <div className="space-y-6">
@@ -352,7 +362,7 @@ function VideoDone({ a }: { a: AnalysisOut }) {
             ))}
         </div>
       </div>
-      <AgentSteps steps={a.trace} />
+      <AgentSteps steps={a.trace} meta={tech} />
     </div>
   );
 }

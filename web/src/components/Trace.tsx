@@ -33,7 +33,19 @@ function Dot({ status }: { status: TraceStep["status"] }) {
 }
 
 /** The agent's steps as a vertical timeline. `live` shows every step; otherwise details are folded. */
-export function AgentSteps({ steps, live = false, scene }: { steps: TraceStep[]; live?: boolean; scene?: string | null }) {
+export function AgentSteps({
+  steps,
+  live = false,
+  scene,
+  meta,
+  actions,
+}: {
+  steps: TraceStep[];
+  live?: boolean;
+  scene?: string | null;
+  meta?: string; // technical details: segmenter, SAM calls, cost, time
+  actions?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(live);
   const done = steps.filter((s) => s.status === "done").length;
   return (
@@ -43,11 +55,13 @@ export function AgentSteps({ steps, live = false, scene }: { steps: TraceStep[];
           <IconSteps size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[15px] font-semibold text-ink-2">Agent steps</div>
+          <div className="text-[15px] font-semibold text-ink-2">{live ? "Agent steps" : "How this was measured"}</div>
           <div className="text-xs text-muted">
             {live ? `${done} of ${steps.length} done` : `${steps.length} steps · numbers are computed in code, never by the language model`}
           </div>
+          {!live && meta && <div className="mt-0.5 font-mono text-[11px] text-muted">{meta}</div>}
         </div>
+        {actions}
         {!live && (
           <button onClick={() => setOpen(!open)} className="rounded-full bg-well px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-[#ebe7de]">
             {open ? "Hide" : "Show"}

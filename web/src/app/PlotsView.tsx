@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, AUTH_CHANGED, fmt, fmtDate, isNativeApp, Plot } from "@/lib/api";
 import { firstName, useAuth } from "@/lib/auth";
-import { openCaptureSheet } from "@/components/AppShell";
+import { openCaptureSheet, openNewPlotSheet } from "@/components/AppShell";
 import { ServerSettings } from "@/components/ServerSettings";
 import { IconAlert, IconCamera, IconCheck, IconPlus, IconSprout } from "@/components/icons";
 import { Button, Delta, ErrorBox, LinkButton, METRIC, Ring, SectionTitle, Skeleton } from "@/components/ui";
@@ -74,9 +74,9 @@ export function PlotsView() {
                 </span>
                 <p className="font-display mt-4 text-[22px] font-semibold">Start your first plot</p>
                 <p className="mt-1 max-w-sm text-sm text-muted">Snap one photo from above. ElderLeaf counts your plants and tells you if they are on track.</p>
-                <LinkButton href="/new" className="mt-5">
+                <Button onClick={() => openNewPlotSheet()} className="mt-5">
                   <IconPlus size={16} strokeWidth={2.4} /> New plot
-                </LinkButton>
+                </Button>
               </div>
             )}
           </section>
@@ -125,12 +125,12 @@ function Hero({ hello, gardenName, plots }: { hello: string; gardenName: string 
         </p>
 
         <div className="mt-5 flex flex-wrap gap-2.5">
-          <Button variant="gold" size="lg" onClick={openCaptureSheet}>
+          <Button variant="gold" size="lg" onClick={() => openCaptureSheet()}>
             <IconCamera size={18} /> Analyze a plot
           </Button>
-          <LinkButton href="/new" variant="glass" size="lg">
+          <Button variant="glass" size="lg" onClick={() => openNewPlotSheet()}>
             <IconPlus size={17} strokeWidth={2.3} /> New plot
-          </LinkButton>
+          </Button>
         </div>
 
         <div className="mt-6 grid grid-cols-3 gap-2 sm:max-w-lg">

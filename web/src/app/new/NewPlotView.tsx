@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { api, today } from "@/lib/api";
-import { PLOTS_CHANGED } from "@/components/AppShell";
+import { PLOTS_CHANGED } from "@/lib/events";
 import { IconPin } from "@/components/icons";
 import { BackLink, Button, Card, ErrorBox, Field, inputClass, PageHead, Spinner } from "@/components/ui";
 
@@ -23,6 +23,19 @@ const CROPS = [
 
 export function NewPlotView() {
   const router = useRouter();
+  return (
+    <div className="max-w-2xl">
+      <BackLink href="/" label="All plots" />
+      <PageHead title="New plot" />
+      <NewPlotForm onCancel={() => router.back()} />
+    </div>
+  );
+}
+
+/** The new-plot form. `bare` drops the cards, for use inside a sheet. After saving it opens the camera screen. */
+export function NewPlotForm({ onCancel, onDone, bare = false }: { onCancel: () => void; onDone?: () => void; bare?: boolean }) {
+  const router = useRouter();
+  const Section = bare ? "div" : Card;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [crop, setCrop] = useState("lettuce");
@@ -59,6 +72,7 @@ export function NewPlotView() {
         lon: num("lon") ?? loc?.lon ?? null,
       });
       window.dispatchEvent(new Event(PLOTS_CHANGED));
+      onDone?.();
       router.push(`/analyze?plot=${plot.id}`);
     } catch (err) {
       setError((err as Error).message);
@@ -67,11 +81,8 @@ export function NewPlotView() {
   }
 
   return (
-    <div className="max-w-2xl">
-      <BackLink href="/" label="All plots" />
-      <PageHead title="New plot" />
       <form onSubmit={submit} className="space-y-4">
-        <Card className="space-y-4">
+        <Section className="space-y-4">
           <Field label="Name">
             <input name="name" required maxLength={120} placeholder="Bed 3 by the fence" className={inputClass} />
           </Field>
@@ -98,9 +109,9 @@ export function NewPlotView() {
               <input name="area_m2" type="number" min="0.1" step="0.1" inputMode="decimal" placeholder="4" className={inputClass} />
             </Field>
           </div>
-        </Card>
+        </Section>
 
-        <Card className="space-y-4">
+        <Section className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Row spacing (cm)">
               <input name="row_spacing_cm" type="number" min="1" inputMode="decimal" placeholder="Optional" className={inputClass} />
@@ -129,18 +140,17 @@ export function NewPlotView() {
               </Field>
             </div>
           )}
-        </Card>
+        </Section>
 
         {error && <ErrorBox message={error} />}
         <div className="flex gap-2">
           <Button type="submit" size="lg" disabled={busy}>
             {busy && <Spinner />} Create and take a photo
           </Button>
-          <Button variant="secondary" size="lg" onClick={() => router.back()}>
+          <Button variant="secondary" size="lg" onClick={onCancel}>
             Cancel
           </Button>
         </div>
       </form>
-    </div>
   );
 }
