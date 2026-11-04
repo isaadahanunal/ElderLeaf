@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1116" width="2000" height="1116">
+<!-- SAM-style outlines with track ids, drawn over hero-garden.jpg (same size) -->
+<ellipse cx="1115" cy="858" rx="92" ry="72" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="5.5" stroke-dasharray="18 12"/>
+<g transform="translate(1043 799)"><rect x="-33" y="-28" width="65" height="56" rx="28" fill="#c39f64"/><text y="13" font-family="Helvetica, Arial, sans-serif" font-size="37" font-weight="700" fill="#15251e" text-anchor="middle">#1</text></g>
+<ellipse cx="1222" cy="776" rx="80" ry="62" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="5.2" stroke-dasharray="16 10"/>
+<g transform="translate(1160 725)"><rect x="-31" y="-26" width="62" height="53" rx="26" fill="#c39f64"/><text y="13" font-family="Helvetica, Arial, sans-serif" font-size="35" font-weight="700" fill="#15251e" text-anchor="middle">#2</text></g>
+<ellipse cx="1303" cy="713" rx="64" ry="52" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="4.8" stroke-dasharray="13 8"/>
+<g transform="translate(1253 670)"><rect x="-29" y="-24" width="57" height="49" rx="24" fill="#c39f64"/><text y="12" font-family="Helvetica, Arial, sans-serif" font-size="33" font-weight="700" fill="#15251e" text-anchor="middle">#3</text></g>
+<ellipse cx="1503" cy="868" rx="92" ry="74" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="5.5" stroke-dasharray="18 12"/>
+<g transform="translate(1431 807)"><rect x="-33" y="-28" width="65" height="56" rx="28" fill="#c39f64"/><text y="13" font-family="Helvetica, Arial, sans-serif" font-size="37" font-weight="700" fill="#15251e" text-anchor="middle">#4</text></g>
+<ellipse cx="1545" cy="770" rx="68" ry="56" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="4.9" stroke-dasharray="14 8"/>
+<g transform="translate(1492 724)"><rect x="-29" y="-25" width="58" height="50" rx="25" fill="#c39f64"/><text y="12" font-family="Helvetica, Arial, sans-serif" font-size="33" font-weight="700" fill="#15251e" text-anchor="middle">#5</text></g>
+<ellipse cx="1797" cy="770" rx="72" ry="58" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="5.0" stroke-dasharray="14 9"/>
+<g transform="translate(1741 722)"><rect x="-30" y="-26" width="60" height="51" rx="26" fill="#c39f64"/><text y="12" font-family="Helvetica, Arial, sans-serif" font-size="34" font-weight="700" fill="#15251e" text-anchor="middle">#6</text></g>
+<ellipse cx="1835" cy="863" rx="98" ry="74" fill="#f6efe2" fill-opacity=".07" stroke="#f6efe2" stroke-opacity=".85" stroke-width="5.7" stroke-dasharray="20 12"/>
+<g transform="translate(1759 802)"><rect x="-34" y="-29" width="67" height="57" rx="29" fill="#c39f64"/><text y="14" font-family="Helvetica, Arial, sans-serif" font-size="38" font-weight="700" fill="#15251e" text-anchor="middle">#7</text></g>
+</svg>

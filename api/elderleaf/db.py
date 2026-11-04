@@ -29,6 +29,7 @@ class Plot(Base):
     __tablename__ = "plots"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("p"))
+    # the owner: the account id (u_...) once someone signs in, otherwise the browser's random device id
     device_id: Mapped[str | None] = mapped_column(String(64), index=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     name: Mapped[str] = mapped_column(String(120))
@@ -57,7 +58,8 @@ class Analysis(Base):
     captured_at: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|running|done|failed
-    image_key: Mapped[str] = mapped_column(String(255))
+    image_key: Mapped[str] = mapped_column(String(255))  # the photo, or a still frame of the video
+    video_key: Mapped[str | None] = mapped_column(String(255))
     image_width: Mapped[int | None] = mapped_column(Integer)
     image_height: Mapped[int | None] = mapped_column(Integer)
     trace: Mapped[list] = mapped_column(JSON, default=list)
@@ -80,6 +82,32 @@ class Note(Base):
     plot: Mapped[Plot] = relationship(back_populates="notes")
 
 
+class User(Base):
+    """An account: e-mail + password (scrypt hash, see auth.py). Plots point to it through Plot.device_id."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("u"))
+    email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    name: Mapped[str] = mapped_column(String(80))
+    garden: Mapped[str | None] = mapped_column(String(120))  # e.g. "METU Bostan"
+    experience: Mapped[str] = mapped_column(String(20), default="just_started")  # just_started|few_seasons|experienced
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthSession(Base):
+    """A signed-in device. Only the SHA-256 of the bearer token is stored."""
+
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped[User] = relationship()
+
+
 def _database_url(url: str) -> str:
     # Supabase hands out postgres:// URLs; we ship psycopg 3
     for prefix in ("postgres://", "postgresql://"):
@@ -91,6 +119,9 @@ def _database_url(url: str) -> str:
 def _make_engine():
     url = _database_url(settings.database_url)
     kwargs: dict = {"pool_pre_ping": True}
+    if url.startswith("postgresql"):
+        # no server-side prepared statements, so Supabase's transaction pooler (port 6543) works too
+        kwargs["connect_args"] = {"prepare_threshold": None}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
         path = url.split("///", 1)[-1]
@@ -121,7 +152,12 @@ def _add_missing_columns() -> None:
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
-    _add_missing_columns()
+    if engine.dialect.name == "postgresql":
+        # Supabase publishes the public schema through its REST API. Row level security with no policies
+        # closes that door: only this server, which owns the tables, can read them (password hashes included).
+        with engine.begin() as conn:
+            for table in Base.metadata.sorted_tables:
+                conn.execute(text(f'ALTER TABLE "{table.name}" ENABLE ROW LEVEL SECURITY'))
 
 
 def get_db() -> Iterator[Session]:

@@ -26,6 +26,11 @@ from sqlalchemy.orm import Session
 from . import report_agent
 from .agent import Proposal, Scan, propose_prompts, scan_plants
 from .config import settings
+from .crops import FALLBACK_PROMPT, crop_info, crop_label, crop_prompt
+from .db import Analysis, Note, SessionLocal
+from .irrigation import water_need
+from .llm import LLMClient, LLMResult
+from .masks import clean_instances, instance_iou, resolve_cross_class
 from .crops import FALLBACK_PROMPT, crop_label, crop_prompt
 from .db import Analysis, Note, SessionLocal
 from .llm import LLMClient, LLMResult
@@ -49,9 +54,11 @@ from .schemas import (
     MetricValue,
     RunStats,
     Scale,
+    Summary,
     TraceStep,
 )
 from .storage import get_storage
+from .summary import write_summary
 
 log = logging.getLogger("elderleaf.pipeline")
 
@@ -73,8 +80,17 @@ _sam: SamClient | None = None
 def get_sam() -> SamClient:
     global _sam
     if _sam is None:
-        _sam = SamClient()
+        if settings.sam_backend == "offline":
+            from .devsam import OfflineSegmenter
+
+            _sam = OfflineSegmenter()
+        else:
+            _sam = SamClient()
     return _sam
+
+
+def segmenter_name() -> str:
+    return getattr(get_sam(), "display_name", "SAM 3.1")
 
 
 def set_sam(client: SamClient | None) -> None:
@@ -177,6 +193,10 @@ def run_analysis(analysis_id: str) -> None:
         analysis = db.get(Analysis, analysis_id)
         if analysis is None:
             return
+        if analysis.mode == "video":
+            from .video import run_video_analysis
+
+            return run_video_analysis(analysis_id)
         analysis.status, analysis.error = "running", None
         db.commit()
         tracer = Tracer(db, analysis)
@@ -649,6 +669,7 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         plot_id=plot.id,
         captured_at=analysis.captured_at,
         days_after_planting=days_after_planting,
+        segmenter=segmenter_name(),
         image=ImageInfo(width=w, height=h),
         image_quality=ImageQuality(**quality),
         masks=masks,
@@ -730,12 +751,106 @@ def _compare(previous: Analysis, analysis: Analysis, metrics: Metrics) -> Compar
     )
 
 
-def _context(metrics: Metrics, comparison: Comparison | None, previous: Analysis | None, quality: dict) -> list[ContextItem]:
+def _weather_day(analysis: Analysis):
+    """Water need for the day the photo was taken (Open-Meteo keeps ~3 months), else today."""
+    import datetime as dt
+
+    today = dt.date.today()
+    day = analysis.captured_at
+    return day if day <= today and (today - day).days <= 90 else today
+
+
+def _notes_between(db: Session, plot_id: str, start, end) -> list[dict]:
+    """Notes after the previous photo (exclusive) up to this one (inclusive)."""
+    stmt = select(Note).where(Note.plot_id == plot_id, Note.noted_on <= end)
+    if start is not None:
+        stmt = stmt.where(Note.noted_on > start)
+    notes = db.scalars(stmt.order_by(Note.noted_on)).all()
+    return [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text} for n in notes]
+
+
+def _facts(plot, day, metrics: Metrics, comparison, context, health: Health, info, irrigation, notes, quality) -> dict:
+    """Everything the summary writer may talk about. The validator only accepts numbers found here."""
+    def value(item: MetricValue | None):
+        return None if item is None else item.value
+
+    return {
+        "crop": crop_label(plot.crop),
+        "days_after_planting": day,
+        "photo_quality": quality["level"],
+        "measurements": {
+            "plant_count": value(metrics.plant_count),
+            "crop_cover_pct": value(metrics.canopy_cover_pct),
+            "weed_share_pct": value(metrics.weed_share_pct),
+            "leaf_spot_share_pct": value(metrics.lesion_share_pct),
+            "mean_plant_area": value(metrics.mean_plant_area),
+            "mean_plant_area_unit": metrics.mean_plant_area.unit,
+        },
+        "change_since_previous_photo": None
+        if comparison is None
+        else {
+            "days_between": comparison.days_between,
+            "deltas": comparison.deltas,
+            "growth_rate": comparison.growth_rate,
+        },
+        "crop_library": None
+        if info is None
+        else {
+            "stage": info["stage"],
+            "stage_days": [info["stage_start_day"], info["stage_end_day"]],
+            "typical_crop_cover_pct": info["cover_typical_pct"],
+        },
+        "water_need": irrigation if irrigation.get("available") else None,
+        "context": [c.model_dump() for c in context],
+        "health": {
+            "signs": [s.description for s in health.signs],
+            "consult_agronomist": health.consult_agronomist,
+            "consult_reasons": health.consult_reasons,
+        },
+        "grower_notes_since_previous_photo": notes,
+    }
+
+
+def _context(
+    metrics: Metrics, comparison: Comparison | None, previous: Analysis | None, quality: dict, info: dict | None = None
+) -> list[ContextItem]:
     items: list[ContextItem] = []
     canopy = metrics.canopy_cover_pct.value
     weed = metrics.weed_share_pct.value
     prev = previous.result["metrics"] if previous else None
     days = comparison.days_between if comparison else None
+
+    # "Is this normal?" for crop cover: compare with the crop library band for this age
+    if info is not None:
+        lo, hi = info["cover_typical_pct"]
+        where = f"Day {info['day']} {info['label'].lower()} is in the {info['stage']} stage"
+        if canopy < lo:
+            items.append(
+                ContextItem(
+                    metric="canopy_cover_pct",
+                    status="attention",
+                    badge="Behind typical",
+                    text=f"{where}. Crop cover of {canopy:.1f}% is below the {lo}-{hi}% usually seen at this age. "
+                    "Plants may be slow, gaps may need replanting, or the photo was taken from higher up than usual.",
+                )
+            )
+        elif canopy > hi:
+            items.append(
+                ContextItem(
+                    metric="canopy_cover_pct",
+                    status="typical",
+                    text=f"{where}. Crop cover of {canopy:.1f}% is above the {lo}-{hi}% usually seen at this age: "
+                    "strong growth, or a closer photo than usual.",
+                )
+            )
+        else:
+            items.append(
+                ContextItem(
+                    metric="canopy_cover_pct",
+                    status="typical",
+                    text=f"{where}. Crop cover of {canopy:.1f}% is within the {lo}-{hi}% usually seen at this age.",
+                )
+            )
 
     if quality["level"] == "low":
         problem = "blurry" if not quality["sharp"] else quality["exposure"].replace("_", " ")

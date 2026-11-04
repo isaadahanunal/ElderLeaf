@@ -229,3 +229,20 @@ eval/results/*/viz/
 .data/
 eval/results/*/gallery/
 api/sam_outputs/
+
+# --- ElderLeaf overrides ---
+# the Python "lib/" rule above must not hide the web app's source
+!web/src/lib/
+# Android build output (Capacitor)
+web/android/app/build/
+web/android/build/
+web/android/.gradle/
+web/android/local.properties
+web/android/app/src/main/assets/public/
+web/android/app/src/main/assets/capacitor.config.json
+web/android/app/src/main/assets/capacitor.plugins.json
+web/out/
+*.apk
+*.aab
+*.keystore
+*.jks

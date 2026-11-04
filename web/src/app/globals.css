@@ -1,0 +1,278 @@
+@import "tailwindcss";
+
+:root {
+  /* warm paper canvas, like the cream hand in the logo */
+  --canvas: #f4f1ea;
+  --card: #ffffff;
+  --well: #f4f2ed;
+  --line: #e8e3d9;
+  --ink: #14181a;
+  --ink-2: #3a3f3c;
+  --muted: #7f8079;
+  /* brand = the logo: deep forest green, sage leaf, gold veins, cream hand */
+  --brand: #1e4d36;
+  --brand-soft: #e8efe9;
+  --forest: #15251e;
+  --gold: #c39f64;
+  --sage: #788867;
+
+  /* one color per metric; validated on white (dataviz validator, contrast >= 3:1) */
+  --plants: #1f9d55;
+  --cover: #0891b2;
+  --weeds: #e8590c;
+  --water: #2563eb;
+  --health: #c2185b;
+  --spots: #7c4dcc;
+
+  --warn: #9a5b00;
+  --warn-soft: #fff4dc;
+  --good: #137a3e;
+  --good-soft: #e5f6eb;
+  --bad: #c0262d;
+
+  /* home hero picture, with the SAM-style outlines drawn on top (same 2000x1116 size) */
+  --hero-art: url("/brand/hero-tags.svg"), url("/brand/hero-garden.jpg");
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-well: var(--well);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-forest: var(--forest);
+  --color-gold: var(--gold);
+  --color-sage: var(--sage);
+  --color-plants: var(--plants);
+  --color-cover: var(--cover);
+  --color-weeds: var(--weeds);
+  --color-water: var(--water);
+  --color-health: var(--health);
+  --color-spots: var(--spots);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-bad: var(--bad);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+  --shadow-card: 0 1px 2px rgba(40, 32, 16, 0.04), 0 2px 8px rgba(40, 32, 16, 0.04);
+  --shadow-lift: 0 18px 40px -18px rgba(21, 37, 30, 0.45);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* headings in a soft old-style serif: the "old hand" voice */
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: "SOFT" 100, "WONK" 0;
+  letter-spacing: -0.015em;
+}
+
+/* the dark forest panels (home hero, sidebar, how-it-works) */
+.forest-panel {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(195, 159, 100, 0.28) 0%, rgba(195, 159, 100, 0) 55%),
+    radial-gradient(90% 80% at 0% 100%, rgba(120, 136, 103, 0.35) 0%, rgba(120, 136, 103, 0) 60%),
+    linear-gradient(160deg, #1e4d36 0%, #15251e 70%);
+  color: #f6efe2;
+}
+
+/* faint leaf veins drawn over the forest panels */
+.leaf-veins {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160' fill='none' stroke='%23f6efe2' stroke-opacity='0.07' stroke-width='1.2'%3E%3Cpath d='M20 140 C 60 100, 100 60, 150 10'/%3E%3Cpath d='M55 105 C 50 85, 52 70, 60 55'/%3E%3Cpath d='M55 105 C 75 105, 92 100, 105 92'/%3E%3Cpath d='M90 70 C 86 52, 90 38, 98 26'/%3E%3Cpath d='M90 70 C 108 70, 122 64, 134 56'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+/* phone: the hero picture as a band on top, zoomed on the beds and the sunset, fading into the panel */
+.hero-band,
+.method-band {
+  height: 210px;
+  background-repeat: no-repeat;
+  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+}
+
+.hero-band {
+  background-image: var(--hero-art);
+  background-position: 100% 60%;
+  background-size: 182% auto;
+}
+
+/* wider screens: the picture sits behind the text and fades out on the left */
+.hero-art,
+.method-art {
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: cover;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.35) 30%, #000 58%);
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.35) 30%, #000 58%);
+}
+
+.hero-art {
+  background-image: var(--hero-art);
+}
+
+/* "How it works": an old hand holding a seedling */
+.method-band {
+  height: 230px;
+  background-image: url("/brand/hero-hand.jpg");
+  background-position: 100% 52%;
+  background-size: 200% auto;
+}
+
+.method-art {
+  background-image: url("/brand/hero-hand.jpg");
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* analysis in progress: a scan line sweeps over the photo */
+@keyframes scan {
+  0% {
+    top: -40%;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+.scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(195, 159, 100, 0) 0%, rgba(195, 159, 100, 0.08) 60%, rgba(246, 239, 226, 0.55) 99%, rgba(246, 239, 226, 0) 100%);
+  animation: scan 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  pointer-events: none;
+}
+
+.scan-grid {
+  background-image:
+    linear-gradient(rgba(246, 239, 226, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(246, 239, 226, 0.09) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.breathe {
+  animation: breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.sheet-up {
+  animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.fade {
+  animation: fade 200ms ease-out;
+}
+
+/* staggered entrance for lists of cards */
+.stagger > * {
+  animation: fade-up 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 60ms;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 180ms;
+}
+.stagger > *:nth-child(n + 5) {
+  animation-delay: 240ms;
+}
+
+
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-in {
+  animation: fade-up 220ms ease-out;
+}
+
+@keyframes ring-in {
+  from {
+    stroke-dashoffset: var(--ring-full);
+  }
+}
+
+.ring-value {
+  animation: ring-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+input[type="range"].compare-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-line,
+  .breathe,
+  .stagger > *,
+  .fade-in,
+  .sheet-up,
+  .ring-value {
+    animation: none;
+  }
+}
