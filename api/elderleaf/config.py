@@ -37,7 +37,10 @@ class Settings:
     supabase_bucket: str = _env("SUPABASE_BUCKET", "images")
 
     # web
-    cors_origins: tuple[str, ...] = tuple(o.strip() for o in _env("CORS_ORIGINS", "*").split(","))
+    # the Android app (Capacitor) loads the web app from http://localhost, so it is always allowed
+    cors_origins: tuple[str, ...] = tuple(
+        dict.fromkeys([o.strip() for o in _env("CORS_ORIGINS", "*").split(",")] + ["http://localhost", "https://localhost"])
+    )
     job_mode: str = _env("JOB_MODE", "thread")  # thread | sync (tests)
 
     # analysis

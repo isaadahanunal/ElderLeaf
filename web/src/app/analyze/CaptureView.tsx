@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtDate, PlotDetail, today } from "@/lib/api";
-import { IconCamera, IconUpload, IconVideo } from "@/components/icons";
+import { IconCamera, IconEye, IconImage, IconVideo } from "@/components/icons";
 import { BackLink, Button, Card, Chip, ErrorBox, inputClass, Notice, PageHead, Segmented, Spinner } from "@/components/ui";
 
 type Mode = "photo" | "video";
@@ -177,8 +177,14 @@ export function CaptureView() {
 
 function DropZone({ mode, onPick, onCamera }: { mode: Mode; onPick: (b: Blob, name: string) => void; onCamera?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const shootRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const accept = mode === "photo" ? "image/*" : "video/*";
+  const take = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) onPick(f, f.name);
+    e.target.value = "";
+  };
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
@@ -195,35 +201,35 @@ function DropZone({ mode, onPick, onCamera }: { mode: Mode; onPick: (b: Blob, na
       }}
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
-      className={`flex min-h-[380px] flex-col items-center justify-center rounded-3xl border-2 border-dashed px-6 py-12 text-center transition ${
-        over ? "border-brand bg-brand-soft" : "border-[#d5d7dd] bg-card"
+      className={`relative flex min-h-[380px] flex-col items-center justify-center overflow-hidden rounded-[28px] border-2 border-dashed px-6 py-12 text-center transition ${
+        over ? "border-brand bg-brand-soft" : "border-[#d9d2c4] bg-card"
       }`}
     >
-      <span className="grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-brand to-forest text-[#f9ecdb] shadow-lg ring-4 ring-gold/25">
-        {mode === "photo" ? <IconCamera size={34} /> : <IconVideo size={34} />}
+      <span className="relative grid h-24 w-24 place-items-center">
+        <span className="breathe absolute inset-0 rounded-full bg-gold/25" />
+        <span className="relative grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-brand to-forest text-[#f9ecdb] shadow-[var(--shadow-lift)]">
+          {mode === "photo" ? <IconCamera size={34} /> : <IconVideo size={34} />}
+        </span>
       </span>
-      <p className="mt-5 text-xl font-bold">{mode === "photo" ? "Snap your plot" : "Film one row"}</p>
-      <p className="mt-1 text-sm text-muted">{mode === "photo" ? "Take a photo or drop one here (JPG, PNG, HEIC)" : "Record a video or drop one here (MP4, MOV)"}</p>
-      <input
-        ref={fileRef}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onPick(f, f.name);
-          e.target.value = "";
-        }}
-      />
-      <div className="mt-6 flex flex-wrap justify-center gap-2">
-        <Button size="lg" onClick={() => fileRef.current?.click()}>
-          <IconUpload size={17} /> {mode === "photo" ? "Choose photo" : "Choose video"}
+      <p className="font-display mt-5 text-[26px] font-semibold">{mode === "photo" ? "Snap your plot" : "Film one row"}</p>
+      <p className="mt-1 max-w-xs text-sm text-muted">
+        {mode === "photo" ? "From above, the whole bed in frame. Or drop a photo here (JPG, PNG, HEIC)." : "Walk slowly along one row, phone low, about 15 s. Or drop a video here (MP4, MOV)."}
+      </p>
+      {/* capture= opens the phone camera directly (Android app and mobile browsers); desktops fall back to a file picker */}
+      <input ref={shootRef} type="file" accept={accept} capture="environment" className="hidden" onChange={take} />
+      <input ref={fileRef} type="file" accept={accept} className="hidden" onChange={take} />
+      <div className="mt-6 flex w-full max-w-sm flex-col gap-2 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center">
+        <Button size="lg" onClick={() => shootRef.current?.click()}>
+          {mode === "photo" ? <IconCamera size={17} /> : <IconVideo size={17} />} {mode === "photo" ? "Take photo" : "Record video"}
         </Button>
         {onCamera && (
           <Button size="lg" variant="secondary" onClick={onCamera}>
-            <IconCamera size={17} /> Camera with guide
+            <IconEye size={17} /> Camera with guide
           </Button>
         )}
+        <Button size="lg" variant="secondary" onClick={() => fileRef.current?.click()}>
+          <IconImage size={17} /> {mode === "photo" ? "From gallery" : "From files"}
+        </Button>
       </div>
     </div>
   );

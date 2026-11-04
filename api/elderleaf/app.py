@@ -2,8 +2,9 @@
 
     cd api && uv run uvicorn elderleaf.app:app --reload      # docs at http://localhost:8000/docs
 
-No login: the browser sends a random `X-Device-Id` header (kept in localStorage). A device sees
-its own plots plus the read-only demo plots.
+Accounts are optional. A guest's browser sends a random `X-Device-Id` header (kept in localStorage);
+a signed-in user sends `Authorization: Bearer <token>` (POST /auth/signup or /auth/login), and the
+plots that device made as a guest move into the account. Everyone also sees the read-only demo plots.
 """
 
 from __future__ import annotations
@@ -25,25 +26,33 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .crops import CROPS, LIBRARY_NOTE, crop_info, crop_label
-from .db import Analysis, Note, Plot, get_db, init_db, new_id
+from .auth import hash_password, new_token, normalize_email, token_hash, verify_password
+from .db import Analysis, AuthSession, Note, Plot, User, get_db, init_db, new_id
 from .irrigation import water_need
 from .jobs import submit
 from .pipeline import current_strategy, get_llm, get_sam, prepare_upload, segmenter_name
 from .render import render_analysis, render_segmentation, to_png
 from .sam import CacheMiss
 from .schemas import (
+    AuthOut,
     AnalysisOut,
     AnalysisResult,
     AnalysisSummary,
     CompareOut,
     CropOut,
+    MeOut,
     NoteCreate,
     NoteOut,
     PlotCreate,
     PlotDetail,
     PlotOut,
+    ProfileUpdate,
+    SignIn,
+    SignUp,
     Summary,
     TraceStep,
+    UserOut,
+    UserStats,
     VideoResult,
 )
 from .summary import write_summary
@@ -72,8 +81,21 @@ if isinstance(get_storage(), LocalStorage):
     app.mount("/files", StaticFiles(directory=get_storage().root), name="files")
 
 
-def device_id(x_device_id: str | None = Header(default=None, max_length=64)) -> str | None:
-    return x_device_id
+def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    session = db.get(AuthSession, token_hash(authorization[7:].strip()))
+    return session.user if session else None
+
+
+def guest_device(x_device_id: str | None = Header(default=None, max_length=64)) -> str | None:
+    # account ids start with u_; a made-up device id must never pose as an account
+    return None if not x_device_id or x_device_id.startswith("u_") else x_device_id
+
+
+def owner(user: User | None = Depends(current_user), device: str | None = Depends(guest_device)) -> str | None:
+    """Who owns new plots and may change them: the signed-in account, otherwise this browser."""
+    return user.id if user else device
 
 
 # ------------------------------------------------------------------ helpers
@@ -90,7 +112,7 @@ def _require_owner(plot: Plot, device: str | None) -> None:
     if plot.is_demo:
         raise HTTPException(403, "Demo plots are read-only. Create your own plot to upload photos.")
     if not device or plot.device_id != device:
-        raise HTTPException(403, "This plot belongs to another device.")
+        raise HTTPException(403, "This plot belongs to someone else.")
 
 
 def _image_url(request: Request, key: str) -> str:
@@ -220,8 +242,108 @@ def crops() -> list[CropOut]:
     return [CropOut(id=k, label=v["label"]) for k, v in CROPS.items()]
 
 
+# ------------------------------------------------------------------ accounts
+
+
+def _user_out(user: User) -> UserOut:
+    return UserOut(id=user.id, email=user.email, name=user.name, garden=user.garden, experience=user.experience, created_at=user.created_at)
+
+
+def _sign_in(db: Session, user: User, device: str | None) -> AuthOut:
+    """Start a session and move this device's guest plots into the account."""
+    claimed = 0
+    if device:
+        for plot in db.scalars(select(Plot).where(Plot.device_id == device, Plot.is_demo.is_(False))):
+            plot.device_id = user.id
+            claimed += 1
+    token, digest = new_token()
+    db.add(AuthSession(token_hash=digest, user_id=user.id))
+    db.commit()
+    return AuthOut(token=token, user=_user_out(user), claimed_plots=claimed)
+
+
+@app.post("/auth/signup", response_model=AuthOut, status_code=201)
+def sign_up(body: SignUp, device: str | None = Depends(guest_device), db: Session = Depends(get_db)) -> AuthOut:
+    email = normalize_email(body.email)
+    if not email:
+        raise HTTPException(422, "Enter a valid e-mail address.")
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(409, "An account with this e-mail already exists. Sign in instead.")
+    user = User(
+        id=new_id("u"),
+        email=email,
+        password_hash=hash_password(body.password),
+        name=body.name.strip(),
+        garden=(body.garden or "").strip() or None,
+        experience=body.experience,
+    )
+    db.add(user)
+    db.flush()
+    return _sign_in(db, user, device)
+
+
+@app.post("/auth/login", response_model=AuthOut)
+def log_in(body: SignIn, device: str | None = Depends(guest_device), db: Session = Depends(get_db)) -> AuthOut:
+    email = normalize_email(body.email)
+    user = db.scalar(select(User).where(User.email == email)) if email else None
+    if user is None or not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "Wrong e-mail or password.")
+    return _sign_in(db, user, device)
+
+
+@app.post("/auth/logout", status_code=204)
+def log_out(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> Response:
+    if authorization and authorization.lower().startswith("bearer "):
+        session = db.get(AuthSession, token_hash(authorization[7:].strip()))
+        if session:
+            db.delete(session)
+            db.commit()
+    return Response(status_code=204)
+
+
+def _require_user(user: User | None = Depends(current_user)) -> User:
+    if user is None:
+        raise HTTPException(401, "Sign in first.")
+    return user
+
+
+@app.get("/me", response_model=MeOut)
+def me(user: User = Depends(_require_user), db: Session = Depends(get_db)) -> MeOut:
+    plots = db.scalars(select(Plot).where(Plot.device_id == user.id)).all()
+    done = [a for p in plots for a in p.analyses if a.status == "done" and a.result]
+    plants = 0
+    for p in plots:
+        photos = [a for a in _ordered(p.analyses) if a.status == "done" and a.mode == "photo" and a.result]
+        if photos:
+            plants += int(photos[-1].result["metrics"]["plant_count"]["value"] or 0)
+    stats = UserStats(
+        plots=len(plots),
+        photos=sum(a.mode == "photo" for a in done),
+        videos=sum(a.mode == "video" for a in done),
+        notes=sum(len(p.notes) for p in plots),
+        plants_counted=plants,
+        first_measured=min((a.captured_at for a in done), default=None),
+    )
+    return MeOut(**_user_out(user).model_dump(), stats=stats)
+
+
+@app.patch("/me", response_model=MeOut)
+def update_me(body: ProfileUpdate, user: User = Depends(_require_user), db: Session = Depends(get_db)) -> MeOut:
+    if body.name is not None:
+        user.name = body.name.strip()
+    if "garden" in body.model_fields_set:
+        user.garden = (body.garden or "").strip() or None
+    if body.experience is not None:
+        user.experience = body.experience
+    db.commit()
+    return me(user, db)
+
+
+# ------------------------------------------------------------------ plots
+
+
 @app.get("/plots", response_model=list[PlotOut])
-def list_plots(request: Request, device: str | None = Depends(device_id), db: Session = Depends(get_db)):
+def list_plots(request: Request, device: str | None = Depends(owner), db: Session = Depends(get_db)):
     condition = Plot.is_demo.is_(True)
     if device:
         condition = or_(condition, Plot.device_id == device)
@@ -230,9 +352,9 @@ def list_plots(request: Request, device: str | None = Depends(device_id), db: Se
 
 
 @app.post("/plots", response_model=PlotOut, status_code=201)
-def create_plot(body: PlotCreate, request: Request, device: str | None = Depends(device_id), db: Session = Depends(get_db)):
+def create_plot(body: PlotCreate, request: Request, device: str | None = Depends(owner), db: Session = Depends(get_db)):
     if not device:
-        raise HTTPException(400, "Send an X-Device-Id header.")
+        raise HTTPException(400, "Send an X-Device-Id header or sign in.")
     if body.crop not in CROPS:
         raise HTTPException(422, f"Unknown crop {body.crop!r}; see GET /crops.")
     plot = Plot(id=new_id("p"), device_id=device, **body.model_dump())
@@ -256,7 +378,7 @@ def get_plot(plot_id: str, request: Request, db: Session = Depends(get_db)):
 
 
 @app.delete("/plots/{plot_id}", status_code=204)
-def delete_plot(plot_id: str, device: str | None = Depends(device_id), db: Session = Depends(get_db)) -> Response:
+def delete_plot(plot_id: str, device: str | None = Depends(owner), db: Session = Depends(get_db)) -> Response:
     plot = _plot_or_404(db, plot_id)
     _require_owner(plot, device)
     db.delete(plot)
@@ -270,7 +392,7 @@ def create_analysis(
     request: Request,
     file: UploadFile = File(...),
     captured_at: dt.date | None = Form(default=None),
-    device: str | None = Depends(device_id),
+    device: str | None = Depends(owner),
     db: Session = Depends(get_db),
 ):
     """Upload a photo. Returns at once with status `pending`; poll GET /analyses/{id}."""
@@ -310,7 +432,7 @@ def create_video_analysis(
     request: Request,
     file: UploadFile = File(...),
     captured_at: dt.date | None = Form(default=None),
-    device: str | None = Depends(device_id),
+    device: str | None = Depends(owner),
     db: Session = Depends(get_db),
 ):
     """Upload a row-walk video (MP4/MOV, ~15 s). Returns `pending`; poll GET /analyses/{id}."""
@@ -391,7 +513,7 @@ def sam_call_image(analysis_id: str, prompt: str, db: Session = Depends(get_db))
 
 
 @app.post("/analyses/{analysis_id}/rerun", response_model=AnalysisOut, status_code=202)
-def rerun_analysis(analysis_id: str, request: Request, device: str | None = Depends(device_id), db: Session = Depends(get_db)):
+def rerun_analysis(analysis_id: str, request: Request, device: str | None = Depends(owner), db: Session = Depends(get_db)):
     analysis = db.get(Analysis, analysis_id)
     if analysis is None:
         raise HTTPException(404, "Analysis not found")
@@ -404,7 +526,7 @@ def rerun_analysis(analysis_id: str, request: Request, device: str | None = Depe
 
 
 @app.post("/plots/{plot_id}/notes", response_model=NoteOut, status_code=201)
-def create_note(plot_id: str, body: NoteCreate, device: str | None = Depends(device_id), db: Session = Depends(get_db)):
+def create_note(plot_id: str, body: NoteCreate, device: str | None = Depends(owner), db: Session = Depends(get_db)):
     plot = _plot_or_404(db, plot_id)
     _require_owner(plot, device)
     note = Note(id=new_id("n"), plot_id=plot.id, kind=body.kind, noted_on=body.date, text=body.text)

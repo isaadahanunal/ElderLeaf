@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Android app build (npm run build:app / scripts/build-apk.sh)
+/dist/

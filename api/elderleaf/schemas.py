@@ -31,6 +31,28 @@ class NoteCreate(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+Experience = Literal["just_started", "few_seasons", "experienced"]
+
+
+class SignUp(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(min_length=8, max_length=128)
+    name: str = Field(min_length=1, max_length=80)
+    garden: str | None = Field(default=None, max_length=120)
+    experience: Experience = "just_started"
+
+
+class SignIn(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=128)
+
+
+class ProfileUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    garden: str | None = Field(default=None, max_length=120)
+    experience: Experience | None = None
+
+
 # ------------------------------------------------------------------ analysis result (stored as JSON)
 
 
@@ -324,3 +346,35 @@ class CompareOut(BaseModel):
     rows: list[dict] = Field(description="metric, label, unit, a, b, delta, per_day")
     notes_between: list[NoteOut]
     summary: Summary
+
+
+# ------------------------------------------------------------------ accounts
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    name: str
+    garden: str | None
+    experience: Experience
+    created_at: dt.datetime
+
+
+class UserStats(BaseModel):
+    plots: int
+    photos: int
+    videos: int
+    notes: int
+    plants_counted: int = Field(description="sum of the latest photo count of each plot")
+    first_measured: dt.date | None
+
+
+class MeOut(UserOut):
+    stats: UserStats
+
+
+class AuthOut(BaseModel):
+    token: str = Field(description="send as `Authorization: Bearer <token>`")
+    user: UserOut
+    claimed_plots: int = Field(description="plots this device made as a guest, now in the account")
+

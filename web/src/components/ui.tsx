@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ReactNode, useEffect, useRef, useState } from "react";
+import { initials } from "@/lib/auth";
 import {
   IconAlert,
   IconArrowDown,
@@ -46,7 +47,7 @@ export function PageHead({ title, chips, actions }: { title: ReactNode; chips?: 
   return (
     <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
-        <h1 className="truncate text-[28px] font-bold leading-tight tracking-tight">{title}</h1>
+        <h1 className="font-display line-clamp-2 break-words text-[30px] font-semibold leading-[1.1] sm:text-[34px]">{title}</h1>
         {chips && <div className="mt-2 flex flex-wrap gap-1.5">{chips}</div>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
@@ -65,7 +66,7 @@ export function BackLink({ href, label }: { href: string; label: string }) {
 
 export function Card({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={`rounded-2xl bg-card p-5 shadow-[var(--shadow-card)] ${onClick ? "cursor-pointer transition hover:shadow-md" : ""} ${className}`}>
+    <div onClick={onClick} className={`rounded-[22px] bg-card p-5 shadow-[var(--shadow-card)] ${onClick ? "cursor-pointer transition hover:shadow-md" : ""} ${className}`}>
       {children}
     </div>
   );
@@ -84,7 +85,7 @@ export function CardHead({ m, title, right, icon }: { m?: MetricKey; title: Reac
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-3 mt-2 flex items-center justify-between gap-3">
-      <h2 className="text-lg font-bold tracking-tight">{children}</h2>
+      <h2 className="font-display text-[21px] font-semibold">{children}</h2>
       {right}
     </div>
   );
@@ -95,7 +96,9 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
 const btn = "inline-flex items-center justify-center gap-2 rounded-full font-semibold transition disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4";
 const btnVariant = {
   primary: "bg-brand text-white hover:bg-forest focus-visible:ring-brand/20",
-  secondary: "bg-[#e9eaee] text-ink hover:bg-[#dfe0e5] focus-visible:ring-black/10",
+  secondary: "bg-[#ebe7de] text-ink hover:bg-[#e2ddd2] focus-visible:ring-black/10",
+  gold: "bg-gold text-forest shadow-lg hover:brightness-105 focus-visible:ring-gold/30",
+  glass: "glass text-[#f6efe2] hover:bg-white/15 focus-visible:ring-white/20",
   white: "bg-card text-ink shadow-[var(--shadow-card)] hover:bg-well focus-visible:ring-black/10",
   ghost: "text-ink-2 hover:bg-black/5 focus-visible:ring-black/10",
 };
@@ -133,14 +136,14 @@ export function LinkButton({ href, children, variant = "primary", size = "md", c
 
 export function Segmented({ options, value, onChange }: { options: { id: string; label: ReactNode }[]; value: string; onChange: (id: string) => void }) {
   return (
-    <div className="inline-flex rounded-full bg-[#e6e7eb] p-1" role="tablist">
+    <div className="inline-flex max-w-full overflow-x-auto rounded-full bg-[#ebe7de] p-1" role="tablist">
       {options.map((o) => (
         <button
           key={o.id}
           role="tab"
           aria-selected={value === o.id}
           onClick={() => onChange(o.id)}
-          className={`flex h-8 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold transition ${value === o.id ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink"}`}
+          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold transition ${value === o.id ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink"}`}
         >
           {o.label}
         </button>
@@ -200,7 +203,7 @@ export function InfoTip({ children, label = "How it's computed" }: { children: R
 
 export function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "good" | "warn" | "dark" | "brand" }) {
   const tones = {
-    neutral: "bg-[#ececf0] text-ink-2",
+    neutral: "bg-[#ece8df] text-ink-2",
     good: "bg-good-soft text-good",
     warn: "bg-warn-soft text-warn",
     dark: "bg-ink text-white",
@@ -244,7 +247,7 @@ export function Delta({ value, unit = "", invert = false }: { value: number | nu
 
 export function BigNumber({ value, unit }: { value: ReactNode; unit?: string }) {
   return (
-    <span className="tabular text-[34px] font-bold leading-none tracking-tight">
+    <span className="tabular text-[36px] font-bold leading-none tracking-tight">
       {value}
       {unit && <span className="ml-0.5 text-lg font-semibold text-muted">{unit}</span>}
     </span>
@@ -283,7 +286,7 @@ export function Ring({
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg viewBox="0 0 100 100" width={size} height={size} className="-rotate-90">
-        <circle cx="50" cy="50" r={r} fill="none" stroke="#eceef2" strokeWidth={stroke} />
+        <circle cx="50" cy="50" r={r} fill="none" stroke="#efebe3" strokeWidth={stroke} />
         {band && <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeOpacity={0.22} strokeWidth={stroke} {...arc(band[0], band[1])} />}
         {v > 0 && (
           <circle
@@ -333,6 +336,19 @@ export function MiniBars({ values, color, height = 44 }: { values: (number | nul
   );
 }
 
+/** Initials on the brand gold, for the signed-in grower. */
+export function Avatar({ name, size = 40, className = "" }: { name?: string | null; size?: number; className?: string }) {
+  return (
+    <span
+      className={`grid shrink-0 select-none place-items-center rounded-full bg-gradient-to-br from-[#d8b87e] to-[#a8834a] font-bold text-forest shadow-sm ${className}`}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.38) }}
+      aria-hidden="true"
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
 // ------------------------------------------------------------------ misc
 
 export function Spinner({ className = "" }: { className?: string }) {
@@ -362,7 +378,7 @@ export function Notice({ tone = "warn", children }: { tone?: "warn" | "info"; ch
 }
 
 export function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-2xl bg-[#e6e7eb] ${className}`} />;
+  return <div className={`animate-pulse rounded-[22px] bg-[#ebe7de] ${className}`} />;
 }
 
 export function SegmenterNotice({ name }: { name: string | undefined }) {

@@ -24,6 +24,7 @@ An experienced grower looks at a bed and says "this row is behind." Someone who 
 | **Water today** | FAO-56: today's reference evapotranspiration for the plot's location × the crop coefficient for its stage, scaled down by the crop cover we measured. In L/m² and for the whole plot. |
 | **Cautious health check** | Possible signs only, with a confidence level and a "consult an agronomist" flag set by rules in code. ElderLeaf never gives a diagnosis, never names a chemical and never gives a dose. |
 | **Demo workspace** | Plots that were analysed beforehand, open to anyone without signing in. Viewing them makes no API calls. |
+| **Accounts (optional)** | Use it as a guest, or sign up with e-mail + password to keep your plots and open them on any device. A profile holds your name, garden (e.g. METU Bostan), growing experience and your totals. |
 
 ## How Meta's models are used
 
@@ -99,13 +100,24 @@ Without a key, `SAM_BACKEND=offline` swaps SAM for a simple color rule so the UI
 
 **Demo workspace:** `uv run python scripts/seed_demo.py demo/manifest.json` runs real photos and videos through the full pipeline once and stores them as read-only demo plots (format in the script's docstring).
 
-**Deploy:** API on Modal ([`api/modal_app.py`](api/modal_app.py)) with Supabase Postgres + Storage (`DATABASE_URL`, `STORAGE_BACKEND=supabase`). Web on Vercel (root `web/`, env `NEXT_PUBLIC_API_URL`).
+**Deploy:** API on Modal ([`api/modal_app.py`](api/modal_app.py)) with Supabase Postgres + Storage (`DATABASE_URL`, `STORAGE_BACKEND=supabase`). Web on Vercel (root `web/`, env `NEXT_PUBLIC_API_URL`). With the Supabase values in `.env`, `cd api && uv run python scripts/setup_supabase.py` creates the tables (row level security on), creates the public `images` bucket and checks an upload end to end. The free plan is enough for the hackathon (500 MB database, 1 GB storage, 50 MB per file; row videos are stored as a small H.264 copy).
+
+**On a phone:** the web app is a PWA (manifest + service worker), so "Add to Home screen" installs it. There is also an Android app: the same Next.js pages exported as static files and wrapped with [Capacitor](https://capacitorjs.com) ([`web/android/`](web/android)), with camera and location permissions.
+
+```bash
+# JDK 21 + Android SDK (platform 36). On macOS: brew install openjdk@21 && brew install --cask android-commandlinetools
+cd web && scripts/build-apk.sh https://<your-api>.modal.run   # → web/dist/ElderLeaf.apk (debug-signed, side-load it)
+```
+
+The API address is baked in at build time and can be changed inside the app (Settings → App), e.g. to `http://<laptop-ip>:8000` on the same Wi-Fi. The API always accepts the app's origin (`http://localhost`) in CORS.
+
+**Accounts and data:** sign-in is optional. A guest's plots belong to a random device id; signing up or in (`POST /auth/signup`, `/auth/login`) moves them into the account, so the same plots open on a phone and a laptop. Passwords are hashed with scrypt, and only the SHA-256 of each session token is stored. In production everything lives in Supabase: Postgres holds plots, analyses, notes, users and sessions (the API creates the tables on start and turns on row level security, so Supabase's public REST API cannot read them), and Storage holds the photos and videos.
 
 ## Repository
 
 ```
 api/   FastAPI backend: SAM 3.1 client, mask cleanup, metrics, agent, validator, irrigation, video tracking
-web/   Next.js mobile-first app: My plots · Plot logbook & compare · Analysis
+web/   Next.js mobile-first app (PWA + Android app via Capacitor): My plots · Plot logbook & compare · Analysis
 eval/  Evaluation scripts and stored results (datasets are downloaded, never committed)
 ```
 

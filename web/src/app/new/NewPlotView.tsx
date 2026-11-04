@@ -83,7 +83,7 @@ export function NewPlotView() {
                   key={id}
                   type="button"
                   onClick={() => setCrop(id)}
-                  className={`h-9 rounded-full px-4 text-sm font-semibold transition ${crop === id ? "bg-brand text-white shadow-sm" : "bg-well text-ink-2 hover:bg-[#e9eaee]"}`}
+                  className={`h-9 rounded-full px-4 text-sm font-semibold transition ${crop === id ? "bg-brand text-white shadow-sm" : "bg-well text-ink-2 hover:bg-[#ebe7de]"}`}
                 >
                   {label}
                 </button>

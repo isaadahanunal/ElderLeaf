@@ -49,7 +49,7 @@ export function AgentSteps({ steps, live = false, scene }: { steps: TraceStep[];
           </div>
         </div>
         {!live && (
-          <button onClick={() => setOpen(!open)} className="rounded-full bg-well px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-[#e9eaee]">
+          <button onClick={() => setOpen(!open)} className="rounded-full bg-well px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-[#ebe7de]">
             {open ? "Hide" : "Show"}
           </button>
         )}

@@ -181,3 +181,55 @@ export const IconArrowDown = (p: P) => (
     <path d="M12 5v14M6 13l6 6 6-6" />
   </Svg>
 );
+export const IconHome = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" />
+  </Svg>
+);
+export const IconClose = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Svg>
+);
+export const IconServer = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="4" width="16" height="7" rx="2" />
+    <rect x="4" y="13" width="16" height="7" rx="2" />
+    <path d="M8 7.5h.01M8 16.5h.01" />
+  </Svg>
+);
+export const IconImage = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="9" cy="10" r="2" />
+    <path d="M21 16l-5-5-9 9" />
+  </Svg>
+);
+export const IconUser = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 20c1.5-3.6 4.5-5.4 8-5.4s6.5 1.8 8 5.4" />
+  </Svg>
+);
+export const IconLogout = (p: P) => (
+  <Svg {...p}>
+    <path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9" />
+  </Svg>
+);
+export const IconEyeOff = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 3l18 18M10.6 6.2A9.8 9.8 0 0 1 12 6c5 0 8.5 4.5 9.5 6-.5.8-1.6 2.2-3.1 3.5M6.3 7.8C4.5 9.1 3.2 10.9 2.5 12c1 1.5 4.5 6 9.5 6 1.3 0 2.5-.3 3.6-.8M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  </Svg>
+);
+export const IconSun = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4" />
+  </Svg>
+);
+export const IconSettings = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+  </Svg>
+);

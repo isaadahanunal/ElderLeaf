@@ -2,12 +2,12 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { AnalysisOut, AnalysisResult, api, fmt, fmtDate, MaskOut, PlotDetail } from "@/lib/api";
+import { AnalysisOut, AnalysisResult, api, fmt, fmtDate, isNativeApp, MaskOut, PlotDetail } from "@/lib/api";
 import { LayerToggles, MaskOverlay } from "@/components/MaskOverlay";
 import { AssistantCard, CoverCard, HealthCard, PlantsCard, SizeCard, SpotsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
 import { RowVideo } from "@/components/RowVideo";
 import { AgentSteps } from "@/components/Trace";
-import { IconDownload, IconSprout } from "@/components/icons";
+import { IconDownload, IconSparkle, IconSprout } from "@/components/icons";
 import { BackLink, Button, Card, Chip, ErrorBox, InfoTip, LinkButton, Notice, PageHead, SegmenterNotice, Skeleton, Spinner } from "@/components/ui";
 
 export function AnalysisView() {
@@ -15,6 +15,7 @@ export function AnalysisView() {
   const [a, setA] = useState<AnalysisOut | null>(null);
   const [plot, setPlot] = useState<PlotDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [runs, setRuns] = useState(0); // bumped by "Try again" to restart polling
 
   useEffect(() => {
     if (!id) return;
@@ -35,7 +36,7 @@ export function AnalysisView() {
       stop = true;
       clearTimeout(timer);
     };
-  }, [id]);
+  }, [id, runs]);
 
   const plotId = a?.plot_id;
   const doneNow = a?.status === "done";
@@ -45,8 +46,9 @@ export function AnalysisView() {
 
   async function rerun() {
     try {
-      await api.rerun(id);
-      window.location.reload();
+      setError(null);
+      setA(await api.rerun(id));
+      setRuns((n) => n + 1);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -73,11 +75,17 @@ export function AnalysisView() {
         actions={
           a?.status === "done" && (
             <>
-              {r && (
-                <Button variant="white" onClick={() => downloadJson(r)}>
-                  <IconDownload size={16} /> JSON
-                </Button>
-              )}
+              {r &&
+                (isNativeApp() ? (
+                  // the Android WebView can't save a blob, so the system browser opens the JSON instead
+                  <LinkButton href={api.analysisJsonUrl(a.id)} external variant="white">
+                    <IconDownload size={16} /> JSON
+                  </LinkButton>
+                ) : (
+                  <Button variant="white" onClick={() => downloadJson(r)}>
+                    <IconDownload size={16} /> JSON
+                  </Button>
+                ))}
               <LinkButton href={`/plot?id=${a.plot_id}`} variant="white">
                 Open plot
               </LinkButton>
@@ -101,15 +109,29 @@ export function AnalysisView() {
 }
 
 function Running({ a }: { a: AnalysisOut }) {
+  const current = [...a.trace].reverse().find((s) => s.status === "running") ?? a.trace.at(-1);
+  const done = a.trace.filter((s) => s.status === "done").length;
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-      <div className="relative overflow-hidden rounded-2xl bg-[#e6e7eb]">
+      <div className="relative min-h-64 overflow-hidden rounded-[26px] bg-forest shadow-[var(--shadow-lift)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={a.image_url} alt="" className="w-full opacity-70" />
-        <div className="absolute inset-0 grid place-items-center">
-          <span className="flex items-center gap-2.5 rounded-full bg-white px-5 py-3 text-sm font-semibold shadow-xl">
-            <Spinner className="text-brand" /> {a.mode === "video" ? "Following every plant…" : "Measuring your plot…"}
-          </span>
+        <img src={a.image_url} alt="" className="w-full opacity-85 saturate-[0.85]" />
+        <div className="scan-grid absolute inset-0" />
+        <div className="scan-line" />
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0c1511]/85 via-[#0c1511]/40 to-transparent px-5 pb-5 pt-20">
+          <div className="flex items-center gap-3.5 text-[#f6efe2]">
+            <span className="breathe grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gold text-forest shadow-lg">
+              <IconSparkle size={20} />
+            </span>
+            <div className="min-w-0">
+              <div className="font-display text-[20px] font-semibold leading-tight">{a.mode === "video" ? "Following every plant…" : "Measuring your plot…"}</div>
+              <div className="flex items-center gap-2 truncate text-[13px] text-[#f6efe2]/75">
+                <Spinner className="h-3 w-3 shrink-0" />
+                {current ? `${current.label}${current.input && current.tool === "run_sam" ? ` · “${current.input}”` : ""}` : "Starting the agent"}
+                {a.trace.length > 0 && <span className="text-[#f6efe2]/45">· {done} done</span>}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <AgentSteps steps={a.trace} live />
@@ -157,12 +179,6 @@ function PhotoResult({ a, r, plot }: { a: AnalysisOut; r: AnalysisResult; plot: 
   const quality = r.image_quality;
   return (
     <div className="space-y-6">
-      <SegmenterNotice name={r.segmenter} />
-      {quality.level === "low" && (
-        <Notice>
-          <b>Photo quality is low</b> ({!quality.sharp ? "blurry" : quality.exposure.replace("_", " ")}), so the numbers may be off. Retake it in even light with a steady hand.
-        </Notice>
-      )}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         <div id="overlay" className="min-w-0">
           <div className="relative">
@@ -196,6 +212,12 @@ function PhotoResult({ a, r, plot }: { a: AnalysisOut; r: AnalysisResult; plot: 
         {r.summary ? <AssistantCard s={r.summary} consult={r.health.consult_agronomist} /> : <div />}
       </div>
 
+      <SegmenterNotice name={r.segmenter} />
+      {quality.level === "low" && (
+        <Notice>
+          <b>Photo quality is low</b> ({!quality.sharp ? "blurry" : quality.exposure.replace("_", " ")}), so the numbers may be off. Retake it in even light with a steady hand.
+        </Notice>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <PlantsCard
           value={m.plant_count.value}

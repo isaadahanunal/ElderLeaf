@@ -241,7 +241,7 @@ function EntryCard({ a }: { a: AnalysisSummary }) {
   const running = a.status === "pending" || a.status === "running";
   return (
     <Link href={`/analysis?id=${a.id}`} className="flex gap-4 rounded-2xl bg-card p-3 pr-4 shadow-[var(--shadow-card)] transition hover:shadow-md">
-      <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-[#e6e7eb]">
+      <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-[#e9e4da]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={a.image_url} alt="" className="h-full w-full object-cover" />
         <span className="absolute bottom-1 left-1 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-ink">{a.mode === "video" ? <IconVideo size={13} /> : <IconCamera size={13} />}</span>
@@ -295,7 +295,7 @@ function NoteCard({ n }: { n: Note }) {
   const kind = NOTE_KINDS.find((k) => k.id === n.kind) ?? NOTE_KINDS[4];
   const { hex } = METRIC[kind.m];
   return (
-    <div className="flex items-center gap-4 rounded-2xl border border-dashed border-[#d8d9de] px-4 py-3">
+    <div className="flex items-center gap-4 rounded-2xl border border-dashed border-[#dcd5c8] px-4 py-3">
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: `${hex}1a`, color: hex }}>
         {n.kind === "watering" ? <IconDroplet size={18} /> : <IconNote size={18} />}
       </span>
@@ -339,7 +339,7 @@ function NoteForm({ plotId, onSaved }: { plotId: string; onSaved: () => void }) 
               key={k.id}
               type="button"
               onClick={() => setKind(k.id)}
-              className={`h-8 rounded-full px-3 text-[13px] font-semibold transition ${kind === k.id ? "bg-ink text-white" : "bg-well text-ink-2 hover:bg-[#e9eaee]"}`}
+              className={`h-8 rounded-full px-3 text-[13px] font-semibold transition ${kind === k.id ? "bg-ink text-white" : "bg-well text-ink-2 hover:bg-[#ebe7de]"}`}
             >
               {k.label}
             </button>
@@ -460,10 +460,10 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
                           </span>
                         </div>
                         <div className="mt-2 space-y-1">
-                          <div className="h-1.5 rounded-full bg-[#eceef2]">
+                          <div className="h-1.5 rounded-full bg-[#efebe3]">
                             <div className="h-1.5 rounded-full bg-[#c9ccd3]" style={{ width: `${((r.a ?? 0) / max) * 100}%` }} />
                           </div>
-                          <div className="h-1.5 rounded-full bg-[#eceef2]">
+                          <div className="h-1.5 rounded-full bg-[#efebe3]">
                             <div className="h-1.5 rounded-full" style={{ width: `${((r.b ?? 0) / max) * 100}%`, background: METRIC[m].hex }} />
                           </div>
                         </div>

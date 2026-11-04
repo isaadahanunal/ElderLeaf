@@ -1,9 +1,9 @@
 import { IconCamera, IconCheck, IconCover, IconDroplet, IconEye, IconSparkle, IconSprout, IconSteps, IconVideo } from "@/components/icons";
 
-export const metadata = { title: "How it works · ElderLeaf" };
+export const metadata = { title: "How ElderLeaf measures · ElderLeaf" };
 
 const STEPS = [
-  { tool: "check_image_quality", title: "Check the photo", text: "Sharpness and light. A poor photo is flagged.", Icon: IconCamera, color: "#85858f" },
+  { tool: "check_image_quality", title: "Check the photo", text: "Sharpness and light. A poor photo is flagged.", Icon: IconCamera, color: "#7f8079" },
   { tool: "propose_prompts", title: "Decide what to look for", text: "Muse Spark Open looks at the photo and picks SAM phrases, e.g. “lettuce seedling”.", Icon: IconSparkle, color: "#0e7490" },
   { tool: "run_sam", title: "Draw every plant", text: "SAM 3.1 returns a mask per plant and weed, plus the A4 sheet for scale.", Icon: IconEye, color: "#1f9d55" },
   { tool: "compute_metrics", title: "Measure in code", text: "Count, crop cover, weed share, plant size. No language model touches a number.", Icon: IconCover, color: "#0891b2" },
@@ -25,17 +25,19 @@ export default function MethodPage() {
   const maxCover = Math.max(...EVAL.map((e) => e.cover));
   return (
     <div>
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand to-forest px-6 py-10 text-white sm:px-10">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.png" alt="" className="pointer-events-none absolute -right-6 -top-6 hidden h-56 w-56 rotate-6 rounded-[48px] opacity-90 shadow-2xl md:block" />
-        <div className="relative max-w-2xl">
-          <div className="text-sm font-semibold text-white/70">How it works</div>
-          <h1 className="mt-2 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">A mask behind every number</h1>
+      <div className="forest-panel relative -mx-4 overflow-hidden px-6 py-10 sm:mx-0 sm:rounded-[32px] sm:px-10">
+        <div className="leaf-veins pointer-events-none absolute inset-0" />
+        {/* an old hand holding a seedling: a band on top on phones, behind the text on the right on wider screens */}
+        <div aria-hidden="true" className="method-band relative -mx-6 -mb-2 -mt-10 sm:hidden" />
+        <div aria-hidden="true" className="method-art pointer-events-none absolute inset-0 hidden sm:block" />
+        <div className="relative max-w-xl sm:max-w-md lg:max-w-[30rem]">
+          <div className="text-sm font-semibold text-white/70">Under the hood</div>
+          <h1 className="font-display mt-2 text-[34px] font-semibold leading-tight sm:text-[44px]">A mask behind every number</h1>
           <p className="mt-3 text-[15px] leading-relaxed text-white/85">
             SAM 3.1 draws each plant. Code does the math. Muse Spark Open only chooses what to look for and explains the result, and a validator checks it before you see it.
           </p>
         </div>
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="relative mt-6 flex flex-wrap gap-2">
           {["SAM 3.1", "Muse Spark Open", "FAO-56", "Open-Meteo"].map((t) => (
             <span key={t} className="rounded-full bg-gold/25 px-3 py-1 text-xs font-semibold text-[#f9ecdb] backdrop-blur">
               {t}
@@ -44,10 +46,10 @@ export default function MethodPage() {
         </div>
       </div>
 
-      <h2 className="mb-3 mt-10 text-lg font-bold tracking-tight">One photo, eight steps</h2>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <h2 className="font-display mb-3 mt-10 text-[21px] font-semibold">One photo, eight steps</h2>
+      <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {STEPS.map((s, i) => (
-          <div key={s.tool} className="rounded-2xl bg-card p-5 shadow-[var(--shadow-card)]">
+          <div key={s.tool} className="rounded-[22px] bg-card p-5 shadow-[var(--shadow-card)]">
             <div className="flex items-center justify-between">
               <span className="grid h-11 w-11 place-items-center rounded-2xl" style={{ background: `${s.color}1a`, color: s.color }}>
                 <s.Icon size={22} />
@@ -100,10 +102,10 @@ export default function MethodPage() {
                   </span>
                 </div>
                 <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-                  <div className="h-2 rounded-full bg-[#eceef2]">
+                  <div className="h-2 rounded-full bg-[#efebe3]">
                     <div className="h-2 rounded-full bg-[#1f9d55]" style={{ width: `${(e.count / maxCount) * 100}%` }} />
                   </div>
-                  <div className="h-2 rounded-full bg-[#eceef2]">
+                  <div className="h-2 rounded-full bg-[#efebe3]">
                     <div className="h-2 rounded-full bg-[#0891b2]" style={{ width: `${(e.cover / maxCover) * 100}%` }} />
                   </div>
                 </div>

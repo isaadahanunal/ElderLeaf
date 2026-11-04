@@ -12,7 +12,7 @@ function ShowMasks({ onClick, active }: { onClick?: () => void; active?: boolean
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${active ? "bg-ink text-white" : "bg-well text-ink-2 hover:bg-[#e9eaee]"}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${active ? "bg-ink text-white" : "bg-well text-ink-2 hover:bg-[#ebe7de]"}`}
     >
       <IconEye size={13} /> {active ? "Hide" : "Masks"}
     </button>
