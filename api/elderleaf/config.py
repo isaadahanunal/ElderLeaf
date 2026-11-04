@@ -46,7 +46,8 @@ class Settings:
     # analysis
     analysis_max_side: int = int(_env("ANALYSIS_MAX_SIDE", "1600"))
     score_threshold: float = float(_env("SCORE_THRESHOLD", "0.5"))
-    enable_lesion: bool = _env("ENABLE_LESION", "0") == "1"
+    # SAM "leaf spot" search for the lesion share (plan). 0 false spots on 8 healthy PhenoBench photos.
+    enable_lesion: bool = _env("ENABLE_LESION", "1") == "1"
 
     # prompt agent (Muse Spark chooses SAM search words). agent | fixed
     prompt_strategy: str = _env("PROMPT_STRATEGY", "agent")

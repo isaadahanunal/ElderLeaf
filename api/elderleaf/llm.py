@@ -43,6 +43,12 @@ PROVIDERS: dict[str, dict] = {
         "price_out": 4.25,
     },
 }
+# Models priced differently from their provider's default model.
+MODEL_PRICES: dict[str, dict] = {
+    # Meta's frontier model (preview). Third-party listings (DeepLearning.AI, LLM Reference);
+    # no cached-input price published, so cached tokens are billed as input.
+    "muse-wonder-1.0": {"price_in": 4.0, "price_cached": None, "price_out": 20.0},
+}
 
 
 class LLMError(RuntimeError):
@@ -94,9 +100,10 @@ class LLMClient:
         if self.provider == "baseten" and self.model != BASETEN_HACKATHON_MODEL:
             raise ValueError(f"Baseten hackathon keys only work with {BASETEN_HACKATHON_MODEL!r}, not {self.model!r}.")
         self.api_key = api_key or getattr(settings, cfg["key"])
-        self.price_in = settings.llm_price_in_per_m if settings.llm_price_in_per_m is not None else cfg["price_in"]
-        self.price_out = settings.llm_price_out_per_m if settings.llm_price_out_per_m is not None else cfg["price_out"]
-        self.price_cached = cfg.get("price_cached", self.price_in)
+        prices = MODEL_PRICES.get(self.model, cfg)
+        self.price_in = settings.llm_price_in_per_m if settings.llm_price_in_per_m is not None else prices["price_in"]
+        self.price_out = settings.llm_price_out_per_m if settings.llm_price_out_per_m is not None else prices["price_out"]
+        self.price_cached = prices.get("price_cached", self.price_in)
         self.reasoning_effort = reasoning_effort or settings.llm_reasoning_effort
         self.cache_dir = Path(cache_dir or settings.llm_cache_dir)
         self.timeout_s = timeout_s

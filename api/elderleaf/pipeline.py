@@ -1,31 +1,41 @@
-"""Photo analysis: SAM 3.1 masks -> cleanup -> metrics -> history -> plain-language context.
+"""Photo analysis: SAM 3.1 masks -> cleanup -> metrics -> history -> report agent.
 
-Deterministic on purpose: every number is computed in code, and the context sentences are
-templates filled with those numbers. The Muse Spark agent (next step) sits on top: it may
-re-prompt SAM and rephrase the context, but never invents a number.
+Every number is computed in code. Two Muse Spark agents sit on top: the prompt agent picks what
+SAM should look for (agent.py), and after the masks the report agent (report_agent.py) checks
+health, crop facts, weather and water need, may ask SAM to look closer, and writes one validated
+report. Neither invents a number; without an LLM the code's template texts are used.
 
 Each step is written to `analyses.trace` as it happens, so the UI can show it live by polling.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import io
 import logging
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 import numpy as np
 from PIL import Image, ImageOps
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .agent import Proposal, propose_prompts
+from . import report_agent
+from .agent import Proposal, Scan, propose_prompts, scan_plants
 from .config import settings
 from .crops import FALLBACK_PROMPT, crop_info, crop_label, crop_prompt
 from .db import Analysis, Note, SessionLocal
 from .irrigation import water_need
 from .llm import LLMClient, LLMResult
 from .masks import clean_instances, instance_iou, resolve_cross_class
+from .crops import FALLBACK_PROMPT, crop_label, crop_prompt
+from .db import Analysis, Note, SessionLocal
+from .llm import LLMClient, LLMResult
+from .masks import clean_instances, instance_iou, merge_duplicates, resolve_cross_class
+from .health import coverage_on_crop, measure_color
 from .metrics import compute_metrics, find_scale, image_quality, mask_polygons
 from .prompting import Attempt, Chain, build_candidates, run_chains, sam_cost, sam_latency
 from .sam import Instance, SamClient, SamError, Segmentation
@@ -35,8 +45,7 @@ from .schemas import (
     ChosenPrompt,
     Comparison,
     ContextItem,
-    Health,
-    HealthSign,
+    CropBreakdown,
     ImageInfo,
     ImageQuality,
     LLMUsage,
@@ -56,9 +65,8 @@ log = logging.getLogger("elderleaf.pipeline")
 PROMPT_WEED = "weed"
 PROMPT_SCALE = "white paper sheet"
 PROMPT_LESION = "leaf spot"
+NOTES_WINDOW_DAYS = 30  # first photo of a plot: notes from the last 30 days
 
-CONSULT_CONFIDENCE = 0.6  # plan rule: consult flag when confidence < 0.6
-LESION_CONSULT_PCT = 5.0
 # Product rules for the "Is this normal?" lines (not agronomic facts; tune with real use)
 WEED_HIGH_PCT = 25.0
 WEED_DOUBLING_MIN_PCT = 5.0
@@ -222,6 +230,197 @@ def _choose_words(tracer: Tracer, image_bytes: bytes, label: str, days_after_pla
     return proposal
 
 
+def _plot_crops(plot) -> list[str]:
+    """The crops in the photo: the main crop, plus the others of a mixed bed."""
+    crops = [plot.crop]
+    if plot.mixed:
+        crops += [c for c in (plot.other_crops or []) if c not in crops]
+    return crops
+
+
+@dataclass
+class Search:
+    """What SAM found, before cleanup: crop masks per crop id ("*" = plants that could not be told apart)."""
+
+    crops: dict[str, list[tuple[Instance, str]]]
+    weeds: list[tuple[Instance, str]]
+    attempts: list[Attempt]
+    strategy: str
+    main_prompt: str | None = None
+    llm: LLMResult | None = None
+    scene: str | None = None
+    crop_visible: bool | None = None
+    proposals: dict[str, list[str]] = field(default_factory=dict)
+    chosen: dict[str, ChosenPrompt] = field(default_factory=dict)
+    scan_items: list[dict] = field(default_factory=list)
+
+
+def _on_done(tracer: Tracer, thr: float, single_tries: bool = False):
+    def on_done(step: int, chain: Chain, attempt: Attempt) -> None:
+        if attempt.error:
+            tracer.done(step, f"failed: {attempt.error}", status="failed")
+            return
+        confidence = f", mean confidence {attempt.mean_confidence:.2f}" if attempt.mean_confidence is not None else ""
+        if single_tries:  # scan mode: every phrase is searched; weak ones may get a fallback word later
+            verdict = "confident" if attempt.ok else "weak"
+        else:
+            verdict = "confident, using it" if attempt.ok else ("weak, no words left" if chain.finished else "weak, trying the next word")
+        tracer.done(step, f"{attempt.masks} masks, {attempt.kept} above {thr:g}{confidence}: {verdict}")
+
+    return on_done
+
+
+# ------------------------------------------------------------------ one crop: ranked words
+
+
+def _single_plan(tracer: Tracer, image_bytes: bytes, crop: str, days_after_planting: int | None):
+    """Agent's 3 ranked phrases first, then the plain "plant"; without the agent the crop's library word."""
+    proposal = _choose_words(tracer, image_bytes, crop_label(crop), days_after_planting)
+    agent_ok = proposal is not None and proposal.error is None
+    if agent_ok:
+        crop_chain = Chain("crop", build_candidates(proposal.crop_prompts, [FALLBACK_PROMPT]))
+        weed_chain = Chain("weed", build_candidates(proposal.weed_prompts, [PROMPT_WEED]))
+    else:
+        crop_chain = Chain("crop", build_candidates([], [crop_prompt(crop), FALLBACK_PROMPT]))
+        weed_chain = Chain("weed", build_candidates([], [PROMPT_WEED]))
+    return proposal, agent_ok, crop_chain, weed_chain
+
+
+def _single_search(tracer: Tracer, sam: SamClient, image_bytes: bytes, crop: str, thr: float, plan) -> Search:
+    proposal, agent_ok, crop_chain, weed_chain = plan
+
+    def on_start(chain: Chain, prompt: str, rank) -> int:
+        what = "crop plants" if chain.target == "crop" else "weeds"
+        which = f"agent's choice {rank}" if isinstance(rank, int) else ("fallback word" if agent_ok else "fixed word")
+        return tracer.start("run_sam", f"Finding {what} ({which})", input=prompt)
+
+    run_chains(sam, image_bytes, [crop_chain, weed_chain], thr, on_start=on_start, on_done=_on_done(tracer, thr))
+    if crop_chain.chosen_seg is None:
+        errors = [a.error for a in crop_chain.attempts if a.error]
+        raise SamError("SAM gave no answer for the crop" + (f": {errors[-1]}" if errors else ""))
+    crop_prompt_used = crop_chain.chosen.prompt
+    weeds = [(i, weed_chain.chosen.prompt) for i in weed_chain.chosen_seg.instances] if weed_chain.chosen_seg else []
+    return Search(
+        crops={crop: [(i, crop_prompt_used) for i in crop_chain.chosen_seg.instances]},
+        weeds=weeds,
+        attempts=crop_chain.attempts + weed_chain.attempts,
+        strategy="agent" if agent_ok else "fixed",
+        main_prompt=crop_prompt_used,
+        llm=proposal.llm if proposal is not None else None,
+        scene=proposal.scene if proposal is not None else None,
+        crop_visible=proposal.crop_visible if proposal is not None else None,
+        proposals={"crop": proposal.crop_prompts, "weed": proposal.weed_prompts} if agent_ok else {},
+        chosen={c.target: ChosenPrompt(prompt=c.chosen.prompt, rank=c.chosen.rank) for c in (crop_chain, weed_chain) if c.chosen},
+    )
+
+
+# ------------------------------------------------------------------ mixed bed: scan mode
+
+
+def _mixed_plan(tracer: Tracer, image_bytes: bytes, crops: list[str]) -> Scan | None:
+    """Scan mode: the agent lists one phrase per kind of plant it sees (as many as the photo needs)."""
+    if current_strategy() != "agent":
+        return None
+    llm = get_llm()
+    labels = [crop_label(c) for c in crops]
+    step = tracer.start("scan_plants", "Listing every kind of plant in the photo", input=", ".join(labels))
+    if not llm.configured:
+        tracer.done(step, "no LLM key configured; using the crop names", status="skipped")
+        return None
+    scan = scan_plants(llm, image_bytes, labels)
+    if scan.error:
+        tracer.done(step, f"agent unavailable ({scan.error}); using the crop names", status="failed")
+    else:
+        tracer.done(step, "; ".join(f"{it['phrase']} ({it['crop'] or 'weed'})" for it in scan.items))
+    return scan
+
+
+def _mixed_search(tracer: Tracer, sam: SamClient, image_bytes: bytes, crops: list[str], thr: float, scan: Scan | None) -> Search:
+    """SAM searches every listed phrase. A crop none of whose phrases was confident gets its library word;
+    weeds get "weed"; if no crop was found at all, the plain "plant" (those plants can't be told apart).
+    Mixed beds measured this way on CropAndWeed: eval/results/mixed/report.md."""
+    labels = {c: crop_label(c) for c in crops}
+    by_name = {label.lower(): c for c, label in labels.items()}
+    items = scan.items if scan is not None and not scan.error else []
+    owner: dict[int, str | None] = {}  # id(chain) -> crop id; None for weeds
+    chains: list[Chain] = []
+
+    def add_chain(kind: str, prompt: str, rank, crop_id: str | None) -> Chain:
+        chain = Chain(kind, [(prompt, rank)])
+        owner[id(chain)] = crop_id
+        chains.append(chain)
+        return chain
+
+    def run_round(batch: list[Chain], round_no: int) -> None:
+        def on_start(chain: Chain, prompt: str, rank) -> int:
+            crop_id = owner[id(chain)]
+            what = "weeds" if crop_id is None else ("plants" if crop_id == "*" else f"{labels[crop_id].lower()} plants")
+            which = f"agent's phrase {rank}" if isinstance(rank, int) else "fallback word"
+            return tracer.start("run_sam", f"Finding {what} ({which})", input=prompt)
+
+        run_chains(sam, image_bytes, batch, thr, on_start=on_start, on_done=_on_done(tracer, thr, single_tries=True), max_workers=6)
+        for chain in batch:
+            for attempt in chain.attempts:
+                attempt.round = round_no
+
+    def confident(crop_id: str | None) -> bool:
+        return any(ch.chosen is not None and ch.chosen.ok for ch in chains if owner[id(ch)] == crop_id)
+
+    def tried(crop_id: str | None) -> set[str]:
+        return {ch.candidates[0][0] for ch in chains if owner[id(ch)] == crop_id}
+
+    # A crop whose library word is the generic "plant" ("other") gets no word of its own: "plant" finds
+    # every plant and would take the other crops' plants (seen on a real sugar beet + other photo).
+    specific = [c for c in crops if crop_prompt(c) != FALLBACK_PROMPT]
+    for rank, item in enumerate(items, start=1):
+        crop_id = by_name.get(item["crop"]) if item["kind"] == "crop" else None
+        if item["kind"] == "weed" or crop_id is not None:
+            add_chain(item["kind"], item["phrase"], rank, crop_id)
+    if not items:  # no agent: every crop's library word
+        for c in specific:
+            add_chain("crop", crop_prompt(c), "fallback", c)
+    first = list(chains)
+    if not any(owner[id(ch)] is None for ch in chains):
+        first.append(add_chain("weed", PROMPT_WEED, "fallback", None))
+    run_round(first, 1)
+
+    retry = [add_chain("crop", crop_prompt(c), "fallback", c) for c in specific if not confident(c) and crop_prompt(c) not in tried(c)]
+    if not confident(None) and PROMPT_WEED not in tried(None):
+        retry.append(add_chain("weed", PROMPT_WEED, "fallback", None))
+    if retry:
+        run_round(retry, 2)
+    if not any(confident(c) for c in crops):
+        run_round([add_chain("crop", FALLBACK_PROMPT, "fallback", "*")], 3)
+
+    found: dict[str, list[tuple[Instance, str]]] = defaultdict(list)
+    weeds: list[tuple[Instance, str]] = []
+    for chain in chains:
+        if chain.chosen_seg is None:
+            continue
+        crop_id = owner[id(chain)]
+        target = weeds if crop_id is None else found[crop_id]
+        target += [(i, chain.chosen.prompt) for i in chain.chosen_seg.instances]
+    if not any(ch.chosen_seg is not None for ch in chains if owner[id(ch)] is not None):
+        errors = [a.error for ch in chains for a in ch.attempts if a.error]
+        raise SamError("SAM gave no answer for the crops" + (f": {errors[-1]}" if errors else ""))
+    proposals: dict[str, list[str]] = defaultdict(list)
+    for item in items:
+        proposals["weed" if item["kind"] == "weed" else by_name.get(item["crop"], item["crop"])].append(item["phrase"])
+    return Search(
+        crops=dict(found),
+        weeds=weeds,
+        attempts=[a for ch in chains for a in ch.attempts],
+        strategy="scan" if items else "fixed",
+        llm=scan.llm if scan is not None else None,
+        scene=scan.scene if scan is not None else None,
+        proposals=dict(proposals),
+        scan_items=items,
+    )
+
+
+# ------------------------------------------------------------------ the analysis
+
+
 def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     started = time.monotonic()
     plot = analysis.plot
@@ -230,46 +429,31 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     h, w = rgb.shape[:2]
     thr = settings.score_threshold
     days_after_planting = (analysis.captured_at - plot.planted_on).days if plot.planted_on else None
+    crops = _plot_crops(plot)
+    mixed = len(crops) > 1
+    label = " + ".join(crop_label(c) for c in crops)
 
     # 1. photo quality
     step = tracer.start("check_image_quality", "Checking photo quality")
     quality = image_quality(rgb)
     tracer.done(step, f"sharpness {quality['blur']}, brightness {quality['brightness']} -> {quality['level']}")
 
-    # 2. what should SAM look for? Agent's 3 ranked phrases first, then the fixed word.
-    proposal = _choose_words(tracer, image_bytes, crop_label(plot.crop), days_after_planting)
-    agent_ok = proposal is not None and proposal.error is None
-    fixed_crop = crop_prompt(plot.crop)
-    if agent_ok:  # agent's 3 phrases, then the plain "plant"
-        crop_chain = Chain("crop", build_candidates(proposal.crop_prompts, [FALLBACK_PROMPT]))
-        weed_chain = Chain("weed", build_candidates(proposal.weed_prompts, [PROMPT_WEED]))
-    else:
-        crop_chain = Chain("crop", build_candidates([], [fixed_crop, FALLBACK_PROMPT]))
-        weed_chain = Chain("weed", build_candidates([], [PROMPT_WEED]))
+    # 2. what should SAM look for? One crop: the agent's 3 ranked phrases. Mixed bed: one phrase per kind of plant.
+    plan = _mixed_plan(tracer, image_bytes, crops) if mixed else _single_plan(tracer, image_bytes, plot.crop, days_after_planting)
 
-    def on_start(chain: Chain, prompt: str, rank) -> int:
-        what = "crop plants" if chain.target == "crop" else "weeds"
-        which = f"agent's choice {rank}" if isinstance(rank, int) else ("fallback word" if agent_ok else "fixed word")
-        return tracer.start("run_sam", f"Finding {what} ({which})", input=prompt)
-
-    def on_done(step: int, chain: Chain, attempt: Attempt) -> None:
-        if attempt.error:
-            tracer.done(step, f"failed: {attempt.error}", status="failed")
-            return
-        confidence = f", mean confidence {attempt.mean_confidence:.2f}" if attempt.mean_confidence is not None else ""
-        verdict = "confident, using it" if attempt.ok else ("weak, no words left" if chain.finished else "weak, trying the next word")
-        tracer.done(step, f"{attempt.masks} masks, {attempt.kept} above {thr:g}{confidence}: {verdict}")
-
-    # 3. SAM 3.1: crop and weed chains round by round; A4 (and leaf spots) alongside
+    # 3. SAM 3.1 runs the search; A4 (and leaf spots) alongside
     sam = get_sam()
     side_jobs = {"scale": (PROMPT_SCALE, "Looking for an A4 sheet (scale)")}
     if settings.enable_lesion:
         side_jobs["lesion"] = (PROMPT_LESION, "Looking for leaf spots")
-    side_steps = {key: tracer.start("run_sam", label, input=prompt) for key, (prompt, label) in side_jobs.items()}
+    side_steps = {key: tracer.start("run_sam", text, input=prompt) for key, (prompt, text) in side_jobs.items()}
     segs: dict[str, Segmentation | None] = {}
     with ThreadPoolExecutor(max_workers=len(side_jobs)) as side:
         side_futures = {key: side.submit(sam.segment, image_bytes, prompt) for key, (prompt, _) in side_jobs.items()}
-        run_chains(sam, image_bytes, [crop_chain, weed_chain], thr, on_start=on_start, on_done=on_done)
+        if mixed:
+            search = _mixed_search(tracer, sam, image_bytes, crops, thr, plan)
+        else:
+            search = _single_search(tracer, sam, image_bytes, plot.crop, thr, plan)
         for key, future in side_futures.items():
             try:
                 segs[key] = future.result()
@@ -277,33 +461,37 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
             except Exception as exc:  # scale and spots are optional
                 segs[key] = None
                 tracer.done(side_steps[key], f"skipped: {exc}", status="failed")
-    if crop_chain.chosen_seg is None:
-        errors = [a.error for a in crop_chain.attempts if a.error]
-        raise SamError("SAM gave no answer for the crop" + (f": {errors[-1]}" if errors else ""))
-    crop_raw, used_crop_prompt = crop_chain.chosen_seg.instances, crop_chain.chosen.prompt
-    weed_raw = weed_chain.chosen_seg.instances if weed_chain.chosen_seg else []
-    used_weed_prompt = weed_chain.chosen.prompt if weed_chain.chosen else PROMPT_WEED
 
     # 4. cleanup + metrics
     step = tracer.start("compute_metrics", "Cleaning masks and computing metrics")
     paper, px_per_cm2, scale_note = find_scale(segs["scale"].instances if segs.get("scale") else [])
-    crop = clean_instances(crop_raw, h * w, thr)
-    weed = clean_instances(weed_raw, h * w, thr)
-    if paper is not None:  # the sheet itself is never a plant
-        crop = [c for c in crop if instance_iou(c, paper) < 0.5]
-        weed = [x for x in weed if instance_iou(x, paper) < 0.5]
-    # The grower told us the crop, so when a weed phrase also matched a crop plant the crop wins
+    prompt_of: dict[int, str] = {}
+
+    def clean(found: list[tuple[Instance, str]]) -> list[Instance]:
+        for inst, prompt in found:
+            prompt_of[id(inst)] = prompt
+        insts = clean_instances([i for i, _ in found], h * w, thr)
+        if paper is not None:  # the sheet itself is never a plant
+            insts = [i for i in insts if instance_iou(i, paper) < 0.5]
+        return merge_duplicates(insts) if len({p for _, p in found}) > 1 else insts
+
+    crop_by = {c: clean(found) for c, found in search.crops.items()}
+    if len(crop_by) > 1:  # the same plant found under two crop names: the higher score wins
+        crop_by = resolve_cross_class(crop_by)
+    crop = [i for insts in crop_by.values() for i in insts]
+    weed = clean(search.weeds)
+    # The grower told us the crop(s), so when a weed phrase also matched a crop plant the crop wins
     # (on 6 PhenoBench images this cut the plant-count error from 8.2 to 3.5 for the agent).
-    resolved = resolve_cross_class({"crop": crop, "weed": weed}, priority=["crop", "weed"])
-    crop, weed = resolved["crop"], resolved["weed"]
-    lesion = None
-    if segs.get("lesion") is not None:
-        lesion = clean_instances(segs["lesion"].instances, h * w, thr, min_area_frac=0.0)
-    m = compute_metrics(crop, weed, lesion, h, w, px_per_cm2)
+    weed = resolve_cross_class({"crop": crop, "weed": weed}, priority=["crop", "weed"])["weed"]
+    lesion, spots_share = None, None
+    if segs.get("lesion") is not None:  # only spots that sit on crop plants count
+        found = clean_instances(segs["lesion"].instances, h * w, thr, min_area_frac=0.0)
+        on_crop, spots_share = coverage_on_crop(found, crop, h, w)
+        lesion = [found[i] for i in on_crop]
 
     masks: list[MaskOut] = []
 
-    def add(inst: Instance, cls: str, prompt: str) -> str:
+    def add(inst: Instance, cls: str, prompt: str, crop_id: str | None = None) -> str:
         mask_id = f"m{len(masks) + 1}"
         masks.append(
             MaskOut(
@@ -314,26 +502,48 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
                 area_px=inst.area,
                 box=list(inst.box),
                 polygons=mask_polygons(inst),
+                crop=crop_id,
             )
         )
         return mask_id
 
-    crop_ids = [add(c, "crop", used_crop_prompt) for c in crop]
-    weed_ids = [add(x, "weed", used_weed_prompt) for x in weed]
+    crop_ids_by = {c: [add(i, "crop", prompt_of[id(i)], None if c == "*" else c) for i in insts] for c, insts in crop_by.items()}
+    crop_ids = [mask_id for ids in crop_ids_by.values() for mask_id in ids]
+    weed_ids = [add(x, "weed", prompt_of[id(x)]) for x in weed]
     lesion_ids = [add(x, "lesion", PROMPT_LESION) for x in lesion or []]
     scale_id = add(paper, "scale", PROMPT_SCALE) if paper is not None else None
+    # plan: lesion share = spot (SAM) or yellowing (color) pixels on the crop / crop pixels
+    color = measure_color(rgb, crop, crop_ids, with_mask=True)
+    m = compute_metrics(crop, weed, lesion, h, w, px_per_cm2, discolored=color.pop("discolored_mask", None))
     tracer.done(
         step,
         f"{m['plant_count']} plants, canopy {m['canopy_cover_pct']}%, weed share {m['weed_share_pct']}%",
     )
 
+    by_crop = None
+    if mixed:
+        by_crop = {}
+        for c in [*crops, *[c for c in crop_by if c not in crops]]:
+            insts = crop_by.get(c, [])
+            cover = np.zeros((h, w), bool)
+            for inst in insts:
+                x0, y0, x1, y1 = inst.box
+                cover[y0:y1, x0:x1] |= inst.mask
+            by_crop[c] = CropBreakdown(
+                label="Plants (not told apart)" if c == "*" else crop_label(c),
+                plant_count=len(insts),
+                canopy_cover_pct=round(float(cover.mean() * 100), 1),
+                mask_ids=crop_ids_by.get(c, []),
+            )
+    if mixed:
+        used = sorted({prompt_of[id(i)] for i in crop})
+        count_how = (f"Number of crop masks found by {', '.join(repr(p) for p in used) or 'the search'} with confidence ≥ {thr}, "
+                     "after removing tiny masks and duplicates; per crop in by_crop.")
+    else:
+        count_how = f"Number of '{search.main_prompt}' masks with confidence ≥ {thr}, after removing tiny masks."
+
     metrics = Metrics(
-        plant_count=MetricValue(
-            value=m["plant_count"],
-            unit="plants",
-            how=f"Number of '{used_crop_prompt}' masks with confidence ≥ {thr}, after removing tiny masks.",
-            mask_ids=crop_ids,
-        ),
+        plant_count=MetricValue(value=m["plant_count"], unit="plants", how=count_how, mask_ids=crop_ids),
         canopy_cover_pct=MetricValue(
             value=m["canopy_cover_pct"],
             unit="%",
@@ -344,11 +554,12 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
             value=m["weed_share_pct"], unit="%", how="Weed area divided by all green area.", mask_ids=weed_ids
         ),
         lesion_share_pct=None
-        if lesion is None
+        if m["lesion_share_pct"] is None
         else MetricValue(
             value=m["lesion_share_pct"],
             unit="%",
-            how="Leaf-spot area on crop plants divided by crop area.",
+            how=("Crop area with leaf spots (SAM 3.1 'leaf spot' masks) or clearly yellow/brown color, divided by crop area."
+                 if lesion is not None else "Crop area with clearly yellow/brown color, divided by crop area (leaf-spot search off)."),
             mask_ids=lesion_ids,
         ),
         mean_plant_area=MetricValue(
@@ -357,27 +568,19 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
             how="Average crop mask area; in cm² when an A4 sheet in the photo sets the scale.",
             mask_ids=crop_ids,
         ),
+        by_crop=by_crop,
     )
 
-    # 5. history
-    step = tracer.start("get_plot_history", "Comparing with the previous photo")
+    # 5. history: the previous photo of this plot and the grower's notes since then
+    step = tracer.start("get_plot_history", "Comparing with the previous photo and reading your notes")
     previous = _previous(db, analysis)
     comparison = _compare(previous, analysis, metrics) if previous else None
-    tracer.done(step, comparison.summary if comparison else "first photo of this plot")
+    notes = _notes_since(db, analysis, previous)
+    tracer.done(step, (comparison.summary if comparison else "first photo of this plot") + (f" {len(notes)} notes since then." if notes else ""))
 
-    # 6. crop library: where should this crop be today? ("Is this normal?")
-    step = tracer.start("lookup_crop_info", "Looking up what is typical for this crop and age", input=plot.crop)
-    info = crop_info(plot.crop, days_after_planting)
-    if info:
-        lo, hi = info["cover_typical_pct"]
-        tracer.done(step, f"day {days_after_planting}: {info['stage']} stage, Kc {info['kc']}, typical cover {lo}-{hi}%")
-    else:
-        reason = "no planting date" if days_after_planting is None else "no reference values for this crop"
-        tracer.done(step, reason, status="skipped")
-
-    # 7. context + health (templated from the numbers above)
-    context = _context(metrics, comparison, previous, quality, info)
-    if proposal is not None and proposal.crop_visible is False:
+    # 6. "Is this normal?" statuses, set in code (their texts are drafts for the report agent)
+    context = _context(metrics, comparison, previous, quality)
+    if search.crop_visible is False:
         context.insert(
             0,
             ContextItem(
@@ -387,68 +590,81 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
                 text=f"The assistant could not clearly see {crop_label(plot.crop).lower()} plants in this photo. Is this the right plot?",
             ),
         )
+    if by_crop:
+        for c in crops:
+            if by_crop[c].plant_count == 0 and crop_prompt(c) != FALLBACK_PROMPT:  # "other": we can't say what was expected
+                context.insert(
+                    0,
+                    ContextItem(
+                        metric="crop",
+                        status="attention",
+                        badge="Crop not found",
+                        text=f"No {crop_label(c).lower()} plants were found in this photo. Is that crop in the frame?",
+                    ),
+                )
     detection_confidence = round(_mean_score(crop), 2) if crop else None
-    health = _health(m, lesion is not None, lesion_ids, quality, detection_confidence)
 
-    # 8. water need (FAO-56 with today's ET0 for the plot location)
-    step = tracer.start("get_weather", "Getting today's weather for the water estimate")
-    irrigation = water_need(
-        plot.crop, days_after_planting, m["canopy_cover_pct"], plot.area_m2, plot.lat, plot.lon, _weather_day(analysis)
+    # 7. report agent: crop facts, health, weather + water need, then one validated report
+    outcome = report_agent.run(
+        report_agent.ReportInputs(
+            plot_name=plot.name,
+            crop_id=plot.crop,
+            crop_label=label,
+            captured_at=analysis.captured_at,
+            days_after_planting=days_after_planting,
+            area_m2=plot.area_m2,
+            lat=plot.lat,
+            lon=plot.lon,
+            row_spacing_cm=plot.row_spacing_cm,
+            plant_spacing_cm=plot.plant_spacing_cm,
+            image_bytes=image_bytes,
+            rgb=rgb,
+            threshold=thr,
+            metrics=metrics,
+            quality=quality,
+            detection_confidence=detection_confidence,
+            crop=crop,
+            crop_ids=crop_ids,
+            lesion_share=spots_share,
+            lesion_ids=lesion_ids,
+            color=color,
+            comparison=comparison,
+            notes=notes,
+            context=context,
+            px_per_cm2=px_per_cm2,
+            scene=search.scene,
+        ),
+        tracer,
+        sam,
+        get_llm() if report_agent.enabled() else None,
+        add,
     )
-    if irrigation["available"]:
-        tracer.done(step, f"ET0 {irrigation['et0_mm']} mm -> {irrigation['liters_per_m2']} L/m² today")
-    else:
-        tracer.done(step, irrigation["reason"], status="skipped")
 
-    # 9. notes the grower wrote since the previous photo
-    notes = _notes_between(db, plot.id, previous.captured_at if previous else None, analysis.captured_at)
-
-    # 10. plain-language summary by Muse Spark, checked by the validator
-    summary_llm: LLMResult | None = None
-    summary = None
-    if settings.enable_summary:
-        step = tracer.start("write_summary", "Writing a plain-language summary")
-        facts = _facts(plot, days_after_planting, metrics, comparison, context, health, info, irrigation, notes, quality)
-        written = write_summary(get_llm() if current_strategy() == "agent" else None, facts)
-        summary_llm = written.llm
-        summary = Summary(**written.to_dict())
-        if written.source == "agent":
-            checked = "passed the validator" + (f" after {written.attempts} tries" if written.attempts > 1 else "")
-            tracer.done(step, f"Muse Spark summary {checked}")
-        else:
-            tracer.done(step, f"template summary ({written.error})", status="skipped")
-        if written.issues:
-            vstep = tracer.start("validate", "Checking every number in the summary against the measurements")
-            tracer.done(vstep, "; ".join(written.issues[:4]), status="done" if written.source == "agent" else "failed")
-
-    # 11. what the search cost (SAM calls + LLM tokens) and how long it took
-    attempts = crop_chain.attempts + weed_chain.attempts
-    n_sam = len(attempts) + len(side_jobs)
-    llm_usage = proposal.llm if proposal is not None and proposal.llm is not None else None
+    # 8. what it all cost (SAM calls + LLM tokens) and how long it took
+    attempts = search.attempts
+    n_sam = len(attempts) + len(side_jobs) + (1 if outcome.report.looked_closer else 0)
+    llm_usage = search.llm
     llm_cost = llm_usage.cost_usd if llm_usage else 0.0
-    if summary_llm is not None:
-        llm_cost = None if llm_cost is None or summary_llm.cost_usd is None else llm_cost + summary_llm.cost_usd
+    report_usage = outcome.llm
+    report_cost = report_usage.cost_usd if report_usage else 0.0
     run_stats = RunStats(
-        strategy="agent" if agent_ok else "fixed",
-        scene=proposal.scene if proposal else None,
-        crop_visible=proposal.crop_visible if proposal else None,
-        proposals={"crop": proposal.crop_prompts, "weed": proposal.weed_prompts} if agent_ok else {},
+        strategy=search.strategy,
+        scene=search.scene,
+        crop_visible=search.crop_visible,
+        proposals=search.proposals,
+        scan_items=search.scan_items,
         attempts=[AttemptOut(**a.to_dict()) for a in attempts],
-        chosen={
-            chain.target: ChosenPrompt(prompt=chain.chosen.prompt, rank=chain.chosen.rank)
-            for chain in (crop_chain, weed_chain)
-            if chain.chosen is not None
-        },
+        chosen=search.chosen,
         sam_calls=n_sam,
         sam_cost_usd=sam_cost(n_sam),
         llm=LLMUsage(**{k: getattr(llm_usage, k) for k in LLMUsage.model_fields}) if llm_usage else None,
-        summary_llm=LLMUsage(**{k: getattr(summary_llm, k) for k in LLMUsage.model_fields}) if summary_llm else None,
-        total_cost_usd=None if llm_cost is None else round(sam_cost(n_sam) + llm_cost, 6),
+        total_cost_usd=None if llm_cost is None or report_cost is None else round(sam_cost(n_sam) + llm_cost + report_cost, 6),
         sam_latency_s=sam_latency(attempts),
         wall_time_s=round(time.monotonic() - started, 2),
+        report_llm=LLMUsage(**{k: getattr(report_usage, k) for k in LLMUsage.model_fields}) if report_usage else None,
     )
 
-    return AnalysisResult(
+    result = AnalysisResult(
         analysis_id=analysis.id,
         plot_id=plot.id,
         captured_at=analysis.captured_at,
@@ -459,16 +675,16 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         masks=masks,
         metrics=metrics,
         scale=Scale(found=paper is not None, mask_id=scale_id, px_per_cm2=None if px_per_cm2 is None else round(px_per_cm2, 3), note=scale_note),
-        health=health,
-        context=context,
-        comparison=comparison,
-        crop_info=info,
-        irrigation=irrigation,
-        summary=summary,
-        notes_since_previous=notes,
+        health=outcome.health,
+        context=outcome.context,
+        comparison=outcome.comparison,
+        irrigation=outcome.irrigation,
+        report=outcome.report,
         run_stats=run_stats,
         agent_trace=[TraceStep(**s) for s in tracer.steps],
     )
+    result.report.markdown = report_agent.render_markdown(result, plot.name, label)
+    return result
 
 
 # ------------------------------------------------------------------ history
@@ -487,6 +703,17 @@ def _previous(db: Session, analysis: Analysis) -> Analysis | None:
         .limit(1)
     )
     return db.scalars(stmt).first()
+
+
+def _notes_since(db: Session, analysis: Analysis, previous: Analysis | None) -> list[dict]:
+    """The grower's notes between the previous photo and this one (the agent may refer to them)."""
+    start = previous.captured_at if previous else analysis.captured_at - dt.timedelta(days=NOTES_WINDOW_DAYS)
+    stmt = (
+        select(Note)
+        .where(Note.plot_id == analysis.plot_id, Note.noted_on > start, Note.noted_on <= analysis.captured_at)
+        .order_by(Note.noted_on)
+    )
+    return [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text[:300]} for n in db.scalars(stmt)]
 
 
 def _value(metrics: dict, key: str):
@@ -690,32 +917,3 @@ def _context(
             ContextItem(metric="weed_share_pct", status="typical", text=f"Weeds make up {weed:.1f}% of the green area.")
         )
     return items
-
-
-def _health(m: dict, assessed: bool, lesion_ids: list[str], quality: dict, confidence: float | None) -> Health:
-    signs: list[HealthSign] = []
-    share = m["lesion_share_pct"]
-    if assessed and share is not None and share >= 1.0:
-        likelihood = "low" if share < 3 else ("medium" if share < 10 else "high")
-        signs.append(
-            HealthSign(
-                type="leaf_spots",
-                likelihood=likelihood,
-                evidence_mask_ids=lesion_ids[:20],
-                description=f"Spots or discolored patches on {share:.1f}% of the crop area.",
-            )
-        )
-    reasons = []
-    if quality["level"] == "low":
-        reasons.append("Photo quality is low, so these results are less reliable.")
-    if share is not None and share >= LESION_CONSULT_PCT:
-        reasons.append(f"Leaf spots cover {share:.1f}% of the crop area; spots have many possible causes.")
-    if confidence is not None and confidence < CONSULT_CONFIDENCE:
-        reasons.append(f"Plant detection confidence is low ({confidence:.2f}).")
-    return Health(
-        assessed=assessed,
-        signs=signs,
-        detection_confidence=confidence,
-        consult_agronomist=bool(reasons),
-        consult_reasons=reasons,
-    )

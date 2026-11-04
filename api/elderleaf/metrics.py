@@ -71,16 +71,20 @@ def compute_metrics(
     height: int,
     width: int,
     px_per_cm2: float | None,
+    discolored: np.ndarray | None = None,
 ) -> dict:
     labels = class_map({1: crop, 2: weed}, height, width, priority=[1, 2])  # crop pixels win overlaps
     veg_px = int((labels > 0).sum())
     crop_px = int((labels == 1).sum())
     weed_px = int((labels == 2).sum())
 
+    # plan: lesion share = spot or yellowing pixels on the crop / crop pixels
     lesion_share = None
-    if lesion is not None:
-        lesion_px = class_map({1: lesion}, height, width) > 0
-        lesion_share = round(100 * int((lesion_px & (labels == 1)).sum()) / crop_px, 1) if crop_px else 0.0
+    if lesion is not None or discolored is not None:
+        spots = class_map({1: lesion}, height, width) > 0 if lesion else np.zeros((height, width), bool)
+        if discolored is not None:
+            spots |= discolored
+        lesion_share = round(100 * int((spots & (labels == 1)).sum()) / crop_px, 1) if crop_px else 0.0
 
     mean_area, unit = None, "px"
     if crop:
