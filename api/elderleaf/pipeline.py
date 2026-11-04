@@ -1,14 +1,16 @@
-"""Photo analysis: SAM 3.1 masks -> cleanup -> metrics -> history -> plain-language context.
+"""Photo analysis: SAM 3.1 masks -> cleanup -> metrics -> history -> report agent.
 
-Deterministic on purpose: every number is computed in code, and the context sentences are
-templates filled with those numbers. The Muse Spark agent (next step) sits on top: it may
-re-prompt SAM and rephrase the context, but never invents a number.
+Every number is computed in code. Two Muse Spark agents sit on top: the prompt agent picks what
+SAM should look for (agent.py), and after the masks the report agent (report_agent.py) checks
+health, crop facts, weather and water need, may ask SAM to look closer, and writes one validated
+report. Neither invents a number; without an LLM the code's template texts are used.
 
 Each step is written to `analyses.trace` as it happens, so the UI can show it live by polling.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import io
 import logging
 import time
@@ -19,10 +21,11 @@ from PIL import Image, ImageOps
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import report_agent
 from .agent import Proposal, propose_prompts
 from .config import settings
 from .crops import FALLBACK_PROMPT, crop_label, crop_prompt
-from .db import Analysis, SessionLocal
+from .db import Analysis, Note, SessionLocal
 from .llm import LLMClient
 from .masks import clean_instances, instance_iou, resolve_cross_class
 from .metrics import compute_metrics, find_scale, image_quality, mask_polygons
@@ -34,8 +37,6 @@ from .schemas import (
     ChosenPrompt,
     Comparison,
     ContextItem,
-    Health,
-    HealthSign,
     ImageInfo,
     ImageQuality,
     LLMUsage,
@@ -53,9 +54,8 @@ log = logging.getLogger("elderleaf.pipeline")
 PROMPT_WEED = "weed"
 PROMPT_SCALE = "white paper sheet"
 PROMPT_LESION = "leaf spot"
+NOTES_WINDOW_DAYS = 30  # first photo of a plot: notes from the last 30 days
 
-CONSULT_CONFIDENCE = 0.6  # plan rule: consult flag when confidence < 0.6
-LESION_CONSULT_PCT = 5.0
 # Product rules for the "Is this normal?" lines (not agronomic facts; tune with real use)
 WEED_HIGH_PCT = 25.0
 WEED_DOUBLING_MIN_PCT = 5.0
@@ -343,13 +343,14 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         ),
     )
 
-    # 5. history
-    step = tracer.start("get_plot_history", "Comparing with the previous photo")
+    # 5. history: the previous photo of this plot and the grower's notes since then
+    step = tracer.start("get_plot_history", "Comparing with the previous photo and reading your notes")
     previous = _previous(db, analysis)
     comparison = _compare(previous, analysis, metrics) if previous else None
-    tracer.done(step, comparison.summary if comparison else "first photo of this plot")
+    notes = _notes_since(db, analysis, previous)
+    tracer.done(step, (comparison.summary if comparison else "first photo of this plot") + (f" {len(notes)} notes since then." if notes else ""))
 
-    # 6. context + health (templated from the numbers above)
+    # 6. "Is this normal?" statuses, set in code (their texts are drafts for the report agent)
     context = _context(metrics, comparison, previous, quality)
     if proposal is not None and proposal.crop_visible is False:
         context.insert(
@@ -362,13 +363,49 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
             ),
         )
     detection_confidence = round(_mean_score(crop), 2) if crop else None
-    health = _health(m, lesion is not None, lesion_ids, quality, detection_confidence)
 
-    # 7. what the search cost (SAM calls + LLM tokens) and how long it took
+    # 7. report agent: crop facts, health, weather + water need, then one validated report
+    outcome = report_agent.run(
+        report_agent.ReportInputs(
+            plot_name=plot.name,
+            crop_id=plot.crop,
+            crop_label=crop_label(plot.crop),
+            captured_at=analysis.captured_at,
+            days_after_planting=days_after_planting,
+            area_m2=plot.area_m2,
+            lat=plot.lat,
+            lon=plot.lon,
+            row_spacing_cm=plot.row_spacing_cm,
+            plant_spacing_cm=plot.plant_spacing_cm,
+            image_bytes=image_bytes,
+            rgb=rgb,
+            threshold=thr,
+            metrics=metrics,
+            quality=quality,
+            detection_confidence=detection_confidence,
+            crop=crop,
+            crop_ids=crop_ids,
+            lesion_share=m["lesion_share_pct"] if lesion is not None else None,
+            lesion_ids=lesion_ids,
+            comparison=comparison,
+            notes=notes,
+            context=context,
+            px_per_cm2=px_per_cm2,
+            scene=proposal.scene if proposal is not None else None,
+        ),
+        tracer,
+        sam,
+        get_llm() if report_agent.enabled() else None,
+        add,
+    )
+
+    # 8. what it all cost (SAM calls + LLM tokens) and how long it took
     attempts = crop_chain.attempts + weed_chain.attempts
-    n_sam = len(attempts) + len(side_jobs)
+    n_sam = len(attempts) + len(side_jobs) + (1 if outcome.report.looked_closer else 0)
     llm_usage = proposal.llm if proposal is not None and proposal.llm is not None else None
     llm_cost = llm_usage.cost_usd if llm_usage else 0.0
+    report_usage = outcome.llm
+    report_cost = report_usage.cost_usd if report_usage else 0.0
     run_stats = RunStats(
         strategy="agent" if agent_ok else "fixed",
         scene=proposal.scene if proposal else None,
@@ -383,12 +420,13 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         sam_calls=n_sam,
         sam_cost_usd=sam_cost(n_sam),
         llm=LLMUsage(**{k: getattr(llm_usage, k) for k in LLMUsage.model_fields}) if llm_usage else None,
-        total_cost_usd=None if llm_cost is None else round(sam_cost(n_sam) + llm_cost, 6),
+        total_cost_usd=None if llm_cost is None or report_cost is None else round(sam_cost(n_sam) + llm_cost + report_cost, 6),
         sam_latency_s=sam_latency(attempts),
         wall_time_s=round(time.monotonic() - started, 2),
+        report_llm=LLMUsage(**{k: getattr(report_usage, k) for k in LLMUsage.model_fields}) if report_usage else None,
     )
 
-    return AnalysisResult(
+    result = AnalysisResult(
         analysis_id=analysis.id,
         plot_id=plot.id,
         captured_at=analysis.captured_at,
@@ -398,12 +436,16 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         masks=masks,
         metrics=metrics,
         scale=Scale(found=paper is not None, mask_id=scale_id, px_per_cm2=None if px_per_cm2 is None else round(px_per_cm2, 3), note=scale_note),
-        health=health,
-        context=context,
-        comparison=comparison,
+        health=outcome.health,
+        context=outcome.context,
+        comparison=outcome.comparison,
+        irrigation=outcome.irrigation,
+        report=outcome.report,
         run_stats=run_stats,
         agent_trace=[TraceStep(**s) for s in tracer.steps],
     )
+    result.report.markdown = report_agent.render_markdown(result, plot.name, crop_label(plot.crop))
+    return result
 
 
 # ------------------------------------------------------------------ history
@@ -422,6 +464,17 @@ def _previous(db: Session, analysis: Analysis) -> Analysis | None:
         .limit(1)
     )
     return db.scalars(stmt).first()
+
+
+def _notes_since(db: Session, analysis: Analysis, previous: Analysis | None) -> list[dict]:
+    """The grower's notes between the previous photo and this one (the agent may refer to them)."""
+    start = previous.captured_at if previous else analysis.captured_at - dt.timedelta(days=NOTES_WINDOW_DAYS)
+    stmt = (
+        select(Note)
+        .where(Note.plot_id == analysis.plot_id, Note.noted_on > start, Note.noted_on <= analysis.captured_at)
+        .order_by(Note.noted_on)
+    )
+    return [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text[:300]} for n in db.scalars(stmt)]
 
 
 def _value(metrics: dict, key: str):
@@ -531,32 +584,3 @@ def _context(metrics: Metrics, comparison: Comparison | None, previous: Analysis
             ContextItem(metric="weed_share_pct", status="typical", text=f"Weeds make up {weed:.1f}% of the green area.")
         )
     return items
-
-
-def _health(m: dict, assessed: bool, lesion_ids: list[str], quality: dict, confidence: float | None) -> Health:
-    signs: list[HealthSign] = []
-    share = m["lesion_share_pct"]
-    if assessed and share is not None and share >= 1.0:
-        likelihood = "low" if share < 3 else ("medium" if share < 10 else "high")
-        signs.append(
-            HealthSign(
-                type="leaf_spots",
-                likelihood=likelihood,
-                evidence_mask_ids=lesion_ids[:20],
-                description=f"Spots or discolored patches on {share:.1f}% of the crop area.",
-            )
-        )
-    reasons = []
-    if quality["level"] == "low":
-        reasons.append("Photo quality is low, so these results are less reliable.")
-    if share is not None and share >= LESION_CONSULT_PCT:
-        reasons.append(f"Leaf spots cover {share:.1f}% of the crop area; spots have many possible causes.")
-    if confidence is not None and confidence < CONSULT_CONFIDENCE:
-        reasons.append(f"Plant detection confidence is low ({confidence:.2f}).")
-    return Health(
-        assessed=assessed,
-        signs=signs,
-        detection_confidence=confidence,
-        consult_agronomist=bool(reasons),
-        consult_reasons=reasons,
-    )

@@ -16,7 +16,8 @@ In production, set `DATABASE_URL` (Supabase Postgres) and `STORAGE_BACKEND=supab
 2. `POST /plots/{id}/analyses` uploads a photo (multipart `file`, optional `captured_at`) and
    returns `202` with status `pending` straight away.
 3. Poll `GET /analyses/{id}` every second. `trace` fills in step by step (quality → SAM crop / weed /
-   A4 → retry if weak → metrics → history). When `status` is `done`, `result` holds the full analysis.
+   A4 → retry if weak → metrics → history → report agent). When `status` is `done`, `result` holds the full
+   analysis and `result.report` the combined report; `GET /analyses/{id}/report.md` returns it as Markdown.
 4. `GET /plots` (cards), `GET /plots/{id}` (logbook: analyses + notes),
    `GET /plots/{id}/export.csv`, `POST /plots/{id}/notes`, `POST /analyses/{id}/rerun`.
 
@@ -60,4 +61,30 @@ npx openapi-typescript http://localhost:8000/openapi.json -o ../web/src/api.d.ts
 - `elderleaf/metrics.py`: plant count, canopy %, weed share %, lesion %, mean plant area (cm² via A4), photo quality
 - `elderleaf/pipeline.py`: runs the steps, compares with the previous photo, writes the context lines from templates
 
-No LLM produces a number. The Muse Spark agent (next) re-prompts SAM and rephrases context only.
+- `elderleaf/health.py`: yellowing / browning measured in the crop masks (relative to the photo's own crop color), leaf-spot share
+- `elderleaf/agronomy.py` + `crop_agronomy.json`: FAO-56 Kc and stage lengths, growth stage of the day, water need (Kc × ET0)
+- `elderleaf/weather.py`: daily ET0 and rain for the plot's location from Open-Meteo (free, no key; `WEATHER=0` turns it off)
+- `elderleaf/report_agent.py`: the report agent (below)
+
+No LLM produces a number.
+
+## Report agent (after the masks)
+
+Follows the plan's agent schema. Code runs the tools and records each one in `trace`: `get_plot_history`
+(previous photo + the grower's notes since then), `lookup_crop_info` (FAO-56 stage and Kc),
+`assess_health` (color and spots inside the crop masks; likelihoods set in code), `get_weather` +
+`compute_irrigation` (needs the plot's lat/lon). Code also sets every "Is this normal?" status, the
+spacing check (when an A4 sheet gives the scale and the plot has row/plant spacing) and the
+"consult an agronomist" flag (photo quality low, spots ≥ 5% of the crop, discoloration of medium
+likelihood, or confidence < 0.6).
+
+Muse Spark then gets these facts plus the photo. It may ask SAM 3.1 to **look closer** once (e.g.
+"leaf spot", "leaf holes") when it sees a possible problem the code did not measure; the result is
+measured in code and added to the facts. Then it writes the report: headline, one line per status,
+health summary, change since last photo, water sentence, up to 3 next steps.
+
+A **validator** checks the reply: every number must match a fact (rounding allowed), health signs must
+be ones code measured, and no pesticide/chemical names, doses or disease names. Errors go back to the
+model once; if it still fails, the code's template texts are used (`report.written_by = "template"`),
+so the writer never fails an analysis. `REPORT_AGENT=0` skips the LLM writer.
+Typical cost: one or two LLM calls, about $0.007, 10–20 s.

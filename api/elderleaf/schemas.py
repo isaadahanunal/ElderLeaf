@@ -84,18 +84,23 @@ class Scale(BaseModel):
 
 
 class HealthSign(BaseModel):
-    type: str
-    likelihood: Literal["low", "medium", "high"]
+    type: str = Field(description="yellowing | browning | leaf_spots | a sign the agent asked SAM to look for")
+    likelihood: Literal["low", "medium", "high"] = Field(description="set in code from share_pct")
     evidence_mask_ids: list[str]
     description: str
+    share_pct: float | None = Field(default=None, description="% of crop area showing the sign (measured in code)")
+    how: str | None = None
 
 
 class Health(BaseModel):
-    assessed: bool = Field(description="false when leaf-spot detection is switched off")
+    assessed: bool = Field(description="false when there were too few crop pixels to judge")
     signs: list[HealthSign] = []
     detection_confidence: float | None
+    confidence: float | None = Field(default=None, description="detection confidence, lowered for a poor photo")
     consult_agronomist: bool
     consult_reasons: list[str] = []
+    measures: dict[str, float] = Field(default={}, description="yellowing / browning / leaf_spots as % of crop area")
+    summary: str | None = None
 
 
 class ContextItem(BaseModel):
@@ -170,6 +175,32 @@ class RunStats(BaseModel):
     total_cost_usd: float | None = Field(description="None when the LLM price is unknown (set LLM_PRICE_*)")
     sam_latency_s: float
     wall_time_s: float
+    report_llm: LLMUsage | None = Field(default=None, description="the report agent's LLM calls, summed")
+
+
+class Irrigation(BaseModel):
+    date: dt.date
+    et0_mm: float = Field(description="reference evapotranspiration of the day (FAO-56), from Open-Meteo")
+    rain_mm: float | None
+    kc: float = Field(description="crop coefficient used: stage Kc capped by the measured crop cover")
+    kc_stage: float | None
+    stage: str | None
+    liters_per_m2: float
+    plot_total_liters: float | None
+    how: str
+    text: str
+    source: str
+
+
+class Report(BaseModel):
+    """The single combined report: every section above, worded by the report agent."""
+
+    headline: str
+    next_steps: list[str] = []
+    markdown: str
+    written_by: Literal["agent", "template"] = Field(description="template = the agent's text failed the validator or no LLM")
+    validator: dict = Field(description="passed, attempts, errors of the last check")
+    looked_closer: str | None = Field(default=None, description="SAM phrase the agent asked for to check a possible sign")
 
 
 class AnalysisResult(BaseModel):
@@ -185,7 +216,8 @@ class AnalysisResult(BaseModel):
     health: Health
     context: list[ContextItem]
     comparison: Comparison | None
-    irrigation: dict | None = None
+    irrigation: Irrigation | None = None
+    report: Report | None = None
     run_stats: RunStats | None = None
     agent_trace: list[TraceStep]
 

@@ -23,6 +23,7 @@ from PIL import Image
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from . import report_agent
 from .config import settings
 from .crops import CROPS, crop_label
 from .db import Analysis, Note, Plot, get_db, init_db, new_id
@@ -286,6 +287,19 @@ def analysis_overlay(analysis_id: str, db: Session = Depends(get_db)) -> Respons
         raise HTTPException(409, "Analysis is not finished yet.")
     rgb = np.array(Image.open(io.BytesIO(get_storage().get(analysis.image_key))).convert("RGB"))
     return Response(to_png(render_analysis(rgb, analysis.result)), media_type="image/png")
+
+
+@app.get("/analyses/{analysis_id}/report.md", response_class=Response)
+def analysis_report(analysis_id: str, db: Session = Depends(get_db)) -> Response:
+    """The single combined report (measurements, health, change, water need, next steps, agent steps)."""
+    analysis = _analysis_or_404(db, analysis_id)
+    if not analysis.result:
+        raise HTTPException(409, "Analysis is not finished yet.")
+    markdown = (analysis.result.get("report") or {}).get("markdown")
+    if not markdown:  # analyses made before the report agent existed
+        result = AnalysisResult.model_validate(analysis.result)
+        markdown = report_agent.render_markdown(result, analysis.plot.name, crop_label(analysis.plot.crop))
+    return Response(markdown, media_type="text/markdown; charset=utf-8")
 
 
 @app.get("/analyses/{analysis_id}/sam.png", response_class=Response)
