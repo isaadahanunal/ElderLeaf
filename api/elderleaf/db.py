@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 from .config import settings
@@ -32,7 +32,10 @@ class Plot(Base):
     device_id: Mapped[str | None] = mapped_column(String(64), index=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     name: Mapped[str] = mapped_column(String(120))
-    crop: Mapped[str] = mapped_column(String(40))
+    crop: Mapped[str] = mapped_column(String(40))  # main crop
+    # more than one crop in the same photo: the agent lists every kind of plant (scan mode)
+    mixed: Mapped[bool] = mapped_column(Boolean, default=False)
+    other_crops: Mapped[list | None] = mapped_column(JSON, default=list)  # crop ids besides `crop`
     planted_on: Mapped[date | None] = mapped_column(Date)
     area_m2: Mapped[float | None] = mapped_column(Float)
     row_spacing_cm: Mapped[float | None] = mapped_column(Float)
@@ -100,8 +103,25 @@ engine = _make_engine()
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
+# Columns added after tables may already exist (create_all never alters a table).
+_ADDED_COLUMNS = {"plots": {"mixed": "BOOLEAN DEFAULT FALSE", "other_crops": "JSON"}}
+
+
+def _add_missing_columns() -> None:
+    existing_tables = set(inspect(engine).get_table_names())
+    with engine.begin() as conn:
+        for table, columns in _ADDED_COLUMNS.items():
+            if table not in existing_tables:
+                continue
+            have = {c["name"] for c in inspect(conn).get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
 
 
 def get_db() -> Iterator[Session]:

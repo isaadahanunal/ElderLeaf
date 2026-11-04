@@ -23,18 +23,22 @@ from PIL import Image
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from . import compare as comparing
 from . import report_agent
 from .config import settings
 from .crops import CROPS, crop_label
 from .db import Analysis, Note, Plot, get_db, init_db, new_id
 from .jobs import submit
-from .pipeline import get_sam, prepare_upload
+from .pipeline import get_llm, get_sam, prepare_upload
 from .render import render_analysis, render_segmentation, to_png
 from .sam import CacheMiss
 from .schemas import (
     AnalysisOut,
     AnalysisResult,
     AnalysisSummary,
+    CompareOut,
+    CompareRow,
+    CompareSide,
     CropOut,
     NoteCreate,
     NoteOut,
@@ -132,6 +136,9 @@ def _plot_fields(plot: Plot, request: Request) -> dict:
         "name": plot.name,
         "crop": plot.crop,
         "crop_label": crop_label(plot.crop),
+        "mixed": bool(plot.mixed),
+        "other_crops": plot.other_crops or [],
+        "other_crop_labels": [crop_label(c) for c in plot.other_crops or []],
         "planted_on": plot.planted_on,
         "days_after_planting": (dt.date.today() - plot.planted_on).days if plot.planted_on else None,
         "area_m2": plot.area_m2,
@@ -200,9 +207,15 @@ def list_plots(request: Request, device: str | None = Depends(device_id), db: Se
 def create_plot(body: PlotCreate, request: Request, device: str | None = Depends(device_id), db: Session = Depends(get_db)):
     if not device:
         raise HTTPException(400, "Send an X-Device-Id header.")
-    if body.crop not in CROPS:
-        raise HTTPException(422, f"Unknown crop {body.crop!r}; see GET /crops.")
-    plot = Plot(id=new_id("p"), device_id=device, **body.model_dump())
+    unknown = [c for c in [body.crop, *body.other_crops] if c not in CROPS]
+    if unknown:
+        raise HTTPException(422, f"Unknown crop(s) {unknown}; see GET /crops.")
+    others = [c for c in dict.fromkeys(body.other_crops) if c != body.crop]
+    if body.mixed and not others:
+        raise HTTPException(422, "A mixed bed needs its other crops in other_crops ('other' if unsure).")
+    fields = body.model_dump()
+    fields["other_crops"] = others if body.mixed else []
+    plot = Plot(id=new_id("p"), device_id=device, **fields)
     db.add(plot)
     db.commit()
     db.refresh(plot)
@@ -219,6 +232,60 @@ def get_plot(plot_id: str, request: Request, db: Session = Depends(get_db)):
             NoteOut(id=n.id, kind=n.kind, date=n.noted_on, text=n.text)
             for n in sorted(plot.notes, key=lambda n: (n.noted_on, n.created_at))
         ],
+    )
+
+
+@app.get("/plots/{plot_id}/compare", response_model=CompareOut)
+def compare_two(plot_id: str, a: str, b: str, request: Request, db: Session = Depends(get_db)) -> CompareOut:
+    """The Compare tab: two analyses of this plot (ids from GET /plots/{id}); the earlier photo is "before".
+    Difference table and notes in between come from code; the summary from the report agent (validated)."""
+    plot = _plot_or_404(db, plot_id)
+    if a == b:
+        raise HTTPException(422, "Pick two different photos.")
+    picked = [db.get(Analysis, x) for x in (a, b)]
+    if any(p is None or p.plot_id != plot.id for p in picked):
+        raise HTTPException(404, "Both analyses must belong to this plot.")
+    if any(p.status != "done" or not p.result for p in picked):
+        raise HTTPException(409, "Both analyses must be finished.")
+    before, after = sorted(picked, key=lambda x: (x.captured_at, x.created_at))
+    notes = db.scalars(
+        select(Note)
+        .where(Note.plot_id == plot.id, Note.noted_on > before.captured_at, Note.noted_on <= after.captured_at)
+        .order_by(Note.noted_on, Note.created_at)
+    ).all()
+    crops = [plot.crop, *(plot.other_crops or [])] if plot.mixed else [plot.crop]
+    storage = get_storage()
+    out = comparing.compare(
+        " + ".join(crop_label(c) for c in crops),
+        before,
+        after,
+        [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text[:300]} for n in notes],
+        (storage.get(before.image_key), storage.get(after.image_key)),
+        get_llm() if report_agent.enabled() else None,
+    )
+    base = str(request.base_url).rstrip("/")
+
+    def side(x: Analysis) -> CompareSide:
+        return CompareSide(
+            analysis_id=x.id,
+            captured_at=x.captured_at,
+            days_after_planting=x.result.get("days_after_planting"),
+            image_url=_image_url(request, x.image_key),
+            overlay_url=f"{base}/analyses/{x.id}/overlay.png",
+        )
+
+    return CompareOut(
+        plot_id=plot.id,
+        before=side(before),
+        after=side(after),
+        days_between=out["days_between"],
+        rows=[CompareRow(**r) for r in out["rows"]],
+        by_crop=out["by_crop"],
+        notes=[NoteOut(id=n.id, kind=n.kind, date=n.noted_on, text=n.text) for n in notes],
+        summary=out["summary"],
+        next_step=out["next_step"],
+        written_by=out["written_by"],
+        validator=out["validator"],
     )
 
 

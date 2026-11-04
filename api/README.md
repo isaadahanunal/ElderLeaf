@@ -20,6 +20,9 @@ In production, set `DATABASE_URL` (Supabase Postgres) and `STORAGE_BACKEND=supab
    analysis and `result.report` the combined report; `GET /analyses/{id}/report.md` returns it as Markdown.
 4. `GET /plots` (cards), `GET /plots/{id}` (logbook: analyses + notes),
    `GET /plots/{id}/export.csv`, `POST /plots/{id}/notes`, `POST /analyses/{id}/rerun`.
+5. `GET /plots/{id}/compare?a={analysis id}&b={analysis id}` (Compare tab): difference table (plants, crop
+   cover, weed share, leaf spots, plant size, change per day), the notes in between, and a change
+   summary the report agent writes from both photos (validated like the report; template without an LLM).
 
 ## How SAM's search words are chosen
 
@@ -33,6 +36,19 @@ on Baseten when `BASETEN_API_KEY` is set, else Muse Spark 1.3 on Meta Model API.
 
 When a weed phrase also matches a crop plant, the crop wins (`priority=["crop", "weed"]`), because
 the grower told us the crop.
+
+**Mixed beds.** When the grower marks a plot as `mixed` (more than one crop in the same photo) and
+names the other crops (`other_crops`, crop ids; `other` if unsure), the agent switches to **scan
+mode** (`agent.scan_plants`): it lists one phrase per kind of plant it sees, as many as the photo
+needs (at most 8), each marked as a crop (which one) or a weed, and SAM searches all of them
+(`run_stats.strategy = "scan"`, `run_stats.scan_items`). A crop none of whose phrases was confident
+gets its library word, weeds get "weed", and only if no crop is found at all the plain "plant"
+(then the plants can't be told apart: `by_crop["*"]`). A crop whose library word is the generic
+"plant" (`other`) never gets a word of its own, so it can't take the named crops' plants. Every crop
+mask carries its crop (`masks[].crop`); `metrics.by_crop` gives count and cover per crop, and a named
+crop with no plants found gets a "Crop not found" line. Why: on CropAndWeed photos with two crops,
+scan mode found the crops (F1 0.78-0.82) where searching the crop names did not (0.04), while for a
+single crop the ranked words did better (eval/results/mixed/report.md).
 
 ## Seeing the masks
 
@@ -58,7 +74,9 @@ npx openapi-typescript http://localhost:8000/openapi.json -o ../web/src/api.d.ts
 
 - `elderleaf/sam.py`: SAM 3.1 client (one concept per request, cached by image hash + prompt)
 - `elderleaf/masks.py`: confidence/size cleanup; crop-vs-weed conflicts go to the higher score
-- `elderleaf/metrics.py`: plant count, canopy %, weed share %, lesion %, mean plant area (cm² via A4), photo quality
+- `elderleaf/metrics.py`: plant count, canopy %, weed share %, lesion %, mean plant area (cm² via A4), photo quality.
+  Lesion % follows the plan: crop pixels under SAM 'leaf spot' masks or clearly yellow/brown, over crop pixels
+  (the leaf-spot search is on by default, `ENABLE_LESION=0` turns it off; it found no spots on 8 healthy PhenoBench photos)
 - `elderleaf/pipeline.py`: runs the steps, compares with the previous photo, writes the context lines from templates
 
 - `elderleaf/health.py`: yellowing / browning measured in the crop masks (relative to the photo's own crop color), leaf-spot share
