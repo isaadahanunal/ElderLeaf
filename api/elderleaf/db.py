@@ -54,7 +54,8 @@ class Analysis(Base):
     captured_at: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|running|done|failed
-    image_key: Mapped[str] = mapped_column(String(255))
+    image_key: Mapped[str] = mapped_column(String(255))  # the photo, or a still frame of the video
+    video_key: Mapped[str | None] = mapped_column(String(255))
     image_width: Mapped[int | None] = mapped_column(Integer)
     image_height: Mapped[int | None] = mapped_column(Integer)
     trace: Mapped[list] = mapped_column(JSON, default=list)

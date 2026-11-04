@@ -167,9 +167,19 @@ class RunStats(BaseModel):
     sam_calls: int
     sam_cost_usd: float
     llm: LLMUsage | None = None
+    summary_llm: LLMUsage | None = Field(default=None, description="tokens of the summary writer (incl. validator retries)")
     total_cost_usd: float | None = Field(description="None when the LLM price is unknown (set LLM_PRICE_*)")
     sam_latency_s: float
     wall_time_s: float
+
+
+class Summary(BaseModel):
+    text: str
+    next_step: str | None = None
+    source: Literal["agent", "template"] = Field(description="agent = Muse Spark text that passed the validator")
+    attempts: int = 0
+    validator_issues: list[str] = Field(default=[], description="what the validator rejected on the way")
+    error: str | None = None
 
 
 class AnalysisResult(BaseModel):
@@ -177,6 +187,7 @@ class AnalysisResult(BaseModel):
     plot_id: str
     captured_at: dt.date
     days_after_planting: int | None
+    segmenter: str = Field(default="SAM 3.1", description="what drew the masks")
     image: ImageInfo
     image_quality: ImageQuality
     masks: list[MaskOut]
@@ -185,8 +196,54 @@ class AnalysisResult(BaseModel):
     health: Health
     context: list[ContextItem]
     comparison: Comparison | None
+    crop_info: dict | None = Field(default=None, description="lookup_crop_info: FAO-56 stage, Kc, expected cover")
     irrigation: dict | None = None
+    summary: Summary | None = None
+    notes_since_previous: list[dict] = []
     run_stats: RunStats | None = None
+    agent_trace: list[TraceStep]
+
+
+# ------------------------------------------------------------------ row video
+
+
+class VideoBox(BaseModel):
+    track_id: int
+    box: list[int] = Field(description="x0, y0, x1, y1 in video frame pixels")
+    score: float | None
+
+
+class VideoFrame(BaseModel):
+    t: float = Field(description="seconds from the start of the video")
+    boxes: list[VideoBox]
+
+
+class VideoTrack(BaseModel):
+    track_id: int
+    frames: int = Field(description="sampled frames this plant was seen in")
+    first_t: float
+    last_t: float
+    mean_score: float | None
+    counted: bool = Field(description="false = too short or too weak to count (likely a false find)")
+
+
+class VideoResult(BaseModel):
+    analysis_id: str
+    plot_id: str
+    captured_at: dt.date
+    segmenter: str
+    prompt: str
+    width: int
+    height: int
+    duration_s: float
+    sampled_fps: float
+    row_plant_count: int
+    max_per_frame: int
+    frames: list[VideoFrame]
+    tracks: list[VideoTrack]
+    how: str
+    context: list[ContextItem] = []
+    run_stats: dict = {}
     agent_trace: list[TraceStep]
 
 
@@ -200,10 +257,15 @@ class CropOut(BaseModel):
 
 class AnalysisSummary(BaseModel):
     id: str
+    mode: str = "photo"
     captured_at: dt.date
     status: str
     image_url: str
+    summary: str | None = None
     plant_count: float | None = None
+    row_plant_count: int | None = None
+    mean_plant_area: float | None = None
+    mean_plant_area_unit: str | None = None
     canopy_cover_pct: float | None = None
     weed_share_pct: float | None = None
     lesion_share_pct: float | None = None
@@ -213,13 +275,16 @@ class AnalysisSummary(BaseModel):
 class AnalysisOut(BaseModel):
     id: str
     plot_id: str
+    mode: str = "photo"
     captured_at: dt.date
     status: str
     error: str | None
-    image_url: str
+    image_url: str = Field(description="the photo, or a still frame of the video")
+    video_url: str | None = None
     overlay_url: str | None = Field(description="picture of the final masks, colored by class")
     trace: list[TraceStep]
     result: AnalysisResult | None
+    video_result: VideoResult | None = None
 
 
 class NoteOut(BaseModel):
@@ -250,3 +315,12 @@ class PlotOut(BaseModel):
 class PlotDetail(PlotOut):
     analyses: list[AnalysisSummary]
     notes: list[NoteOut]
+
+
+class CompareOut(BaseModel):
+    a: AnalysisSummary
+    b: AnalysisSummary
+    days_between: int
+    rows: list[dict] = Field(description="metric, label, unit, a, b, delta, per_day")
+    notes_between: list[NoteOut]
+    summary: Summary

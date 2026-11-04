@@ -21,9 +21,10 @@ from sqlalchemy.orm import Session
 
 from .agent import Proposal, propose_prompts
 from .config import settings
-from .crops import FALLBACK_PROMPT, crop_label, crop_prompt
-from .db import Analysis, SessionLocal
-from .llm import LLMClient
+from .crops import FALLBACK_PROMPT, crop_info, crop_label, crop_prompt
+from .db import Analysis, Note, SessionLocal
+from .irrigation import water_need
+from .llm import LLMClient, LLMResult
 from .masks import clean_instances, instance_iou, resolve_cross_class
 from .metrics import compute_metrics, find_scale, image_quality, mask_polygons
 from .prompting import Attempt, Chain, build_candidates, run_chains, sam_cost, sam_latency
@@ -44,9 +45,11 @@ from .schemas import (
     MetricValue,
     RunStats,
     Scale,
+    Summary,
     TraceStep,
 )
 from .storage import get_storage
+from .summary import write_summary
 
 log = logging.getLogger("elderleaf.pipeline")
 
@@ -69,8 +72,17 @@ _sam: SamClient | None = None
 def get_sam() -> SamClient:
     global _sam
     if _sam is None:
-        _sam = SamClient()
+        if settings.sam_backend == "offline":
+            from .devsam import OfflineSegmenter
+
+            _sam = OfflineSegmenter()
+        else:
+            _sam = SamClient()
     return _sam
+
+
+def segmenter_name() -> str:
+    return getattr(get_sam(), "display_name", "SAM 3.1")
 
 
 def set_sam(client: SamClient | None) -> None:
@@ -173,6 +185,10 @@ def run_analysis(analysis_id: str) -> None:
         analysis = db.get(Analysis, analysis_id)
         if analysis is None:
             return
+        if analysis.mode == "video":
+            from .video import run_video_analysis
+
+            return run_video_analysis(analysis_id)
         analysis.status, analysis.error = "running", None
         db.commit()
         tracer = Tracer(db, analysis)
@@ -349,8 +365,18 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     comparison = _compare(previous, analysis, metrics) if previous else None
     tracer.done(step, comparison.summary if comparison else "first photo of this plot")
 
-    # 6. context + health (templated from the numbers above)
-    context = _context(metrics, comparison, previous, quality)
+    # 6. crop library: where should this crop be today? ("Is this normal?")
+    step = tracer.start("lookup_crop_info", "Looking up what is typical for this crop and age", input=plot.crop)
+    info = crop_info(plot.crop, days_after_planting)
+    if info:
+        lo, hi = info["cover_typical_pct"]
+        tracer.done(step, f"day {days_after_planting}: {info['stage']} stage, Kc {info['kc']}, typical cover {lo}-{hi}%")
+    else:
+        reason = "no planting date" if days_after_planting is None else "no reference values for this crop"
+        tracer.done(step, reason, status="skipped")
+
+    # 7. context + health (templated from the numbers above)
+    context = _context(metrics, comparison, previous, quality, info)
     if proposal is not None and proposal.crop_visible is False:
         context.insert(
             0,
@@ -364,11 +390,44 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     detection_confidence = round(_mean_score(crop), 2) if crop else None
     health = _health(m, lesion is not None, lesion_ids, quality, detection_confidence)
 
-    # 7. what the search cost (SAM calls + LLM tokens) and how long it took
+    # 8. water need (FAO-56 with today's ET0 for the plot location)
+    step = tracer.start("get_weather", "Getting today's weather for the water estimate")
+    irrigation = water_need(
+        plot.crop, days_after_planting, m["canopy_cover_pct"], plot.area_m2, plot.lat, plot.lon, _weather_day(analysis)
+    )
+    if irrigation["available"]:
+        tracer.done(step, f"ET0 {irrigation['et0_mm']} mm -> {irrigation['liters_per_m2']} L/m² today")
+    else:
+        tracer.done(step, irrigation["reason"], status="skipped")
+
+    # 9. notes the grower wrote since the previous photo
+    notes = _notes_between(db, plot.id, previous.captured_at if previous else None, analysis.captured_at)
+
+    # 10. plain-language summary by Muse Spark, checked by the validator
+    summary_llm: LLMResult | None = None
+    summary = None
+    if settings.enable_summary:
+        step = tracer.start("write_summary", "Writing a plain-language summary")
+        facts = _facts(plot, days_after_planting, metrics, comparison, context, health, info, irrigation, notes, quality)
+        written = write_summary(get_llm() if current_strategy() == "agent" else None, facts)
+        summary_llm = written.llm
+        summary = Summary(**written.to_dict())
+        if written.source == "agent":
+            checked = "passed the validator" + (f" after {written.attempts} tries" if written.attempts > 1 else "")
+            tracer.done(step, f"Muse Spark summary {checked}")
+        else:
+            tracer.done(step, f"template summary ({written.error})", status="skipped")
+        if written.issues:
+            vstep = tracer.start("validate", "Checking every number in the summary against the measurements")
+            tracer.done(vstep, "; ".join(written.issues[:4]), status="done" if written.source == "agent" else "failed")
+
+    # 11. what the search cost (SAM calls + LLM tokens) and how long it took
     attempts = crop_chain.attempts + weed_chain.attempts
     n_sam = len(attempts) + len(side_jobs)
     llm_usage = proposal.llm if proposal is not None and proposal.llm is not None else None
     llm_cost = llm_usage.cost_usd if llm_usage else 0.0
+    if summary_llm is not None:
+        llm_cost = None if llm_cost is None or summary_llm.cost_usd is None else llm_cost + summary_llm.cost_usd
     run_stats = RunStats(
         strategy="agent" if agent_ok else "fixed",
         scene=proposal.scene if proposal else None,
@@ -383,6 +442,7 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         sam_calls=n_sam,
         sam_cost_usd=sam_cost(n_sam),
         llm=LLMUsage(**{k: getattr(llm_usage, k) for k in LLMUsage.model_fields}) if llm_usage else None,
+        summary_llm=LLMUsage(**{k: getattr(summary_llm, k) for k in LLMUsage.model_fields}) if summary_llm else None,
         total_cost_usd=None if llm_cost is None else round(sam_cost(n_sam) + llm_cost, 6),
         sam_latency_s=sam_latency(attempts),
         wall_time_s=round(time.monotonic() - started, 2),
@@ -393,6 +453,7 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         plot_id=plot.id,
         captured_at=analysis.captured_at,
         days_after_planting=days_after_planting,
+        segmenter=segmenter_name(),
         image=ImageInfo(width=w, height=h),
         image_quality=ImageQuality(**quality),
         masks=masks,
@@ -401,6 +462,10 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         health=health,
         context=context,
         comparison=comparison,
+        crop_info=info,
+        irrigation=irrigation,
+        summary=summary,
+        notes_since_previous=notes,
         run_stats=run_stats,
         agent_trace=[TraceStep(**s) for s in tracer.steps],
     )
@@ -459,12 +524,106 @@ def _compare(previous: Analysis, analysis: Analysis, metrics: Metrics) -> Compar
     )
 
 
-def _context(metrics: Metrics, comparison: Comparison | None, previous: Analysis | None, quality: dict) -> list[ContextItem]:
+def _weather_day(analysis: Analysis):
+    """Water need for the day the photo was taken (Open-Meteo keeps ~3 months), else today."""
+    import datetime as dt
+
+    today = dt.date.today()
+    day = analysis.captured_at
+    return day if day <= today and (today - day).days <= 90 else today
+
+
+def _notes_between(db: Session, plot_id: str, start, end) -> list[dict]:
+    """Notes after the previous photo (exclusive) up to this one (inclusive)."""
+    stmt = select(Note).where(Note.plot_id == plot_id, Note.noted_on <= end)
+    if start is not None:
+        stmt = stmt.where(Note.noted_on > start)
+    notes = db.scalars(stmt.order_by(Note.noted_on)).all()
+    return [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text} for n in notes]
+
+
+def _facts(plot, day, metrics: Metrics, comparison, context, health: Health, info, irrigation, notes, quality) -> dict:
+    """Everything the summary writer may talk about. The validator only accepts numbers found here."""
+    def value(item: MetricValue | None):
+        return None if item is None else item.value
+
+    return {
+        "crop": crop_label(plot.crop),
+        "days_after_planting": day,
+        "photo_quality": quality["level"],
+        "measurements": {
+            "plant_count": value(metrics.plant_count),
+            "crop_cover_pct": value(metrics.canopy_cover_pct),
+            "weed_share_pct": value(metrics.weed_share_pct),
+            "leaf_spot_share_pct": value(metrics.lesion_share_pct),
+            "mean_plant_area": value(metrics.mean_plant_area),
+            "mean_plant_area_unit": metrics.mean_plant_area.unit,
+        },
+        "change_since_previous_photo": None
+        if comparison is None
+        else {
+            "days_between": comparison.days_between,
+            "deltas": comparison.deltas,
+            "growth_rate": comparison.growth_rate,
+        },
+        "crop_library": None
+        if info is None
+        else {
+            "stage": info["stage"],
+            "stage_days": [info["stage_start_day"], info["stage_end_day"]],
+            "typical_crop_cover_pct": info["cover_typical_pct"],
+        },
+        "water_need": irrigation if irrigation.get("available") else None,
+        "context": [c.model_dump() for c in context],
+        "health": {
+            "signs": [s.description for s in health.signs],
+            "consult_agronomist": health.consult_agronomist,
+            "consult_reasons": health.consult_reasons,
+        },
+        "grower_notes_since_previous_photo": notes,
+    }
+
+
+def _context(
+    metrics: Metrics, comparison: Comparison | None, previous: Analysis | None, quality: dict, info: dict | None = None
+) -> list[ContextItem]:
     items: list[ContextItem] = []
     canopy = metrics.canopy_cover_pct.value
     weed = metrics.weed_share_pct.value
     prev = previous.result["metrics"] if previous else None
     days = comparison.days_between if comparison else None
+
+    # "Is this normal?" for crop cover: compare with the crop library band for this age
+    if info is not None:
+        lo, hi = info["cover_typical_pct"]
+        where = f"Day {info['day']} {info['label'].lower()} is in the {info['stage']} stage"
+        if canopy < lo:
+            items.append(
+                ContextItem(
+                    metric="canopy_cover_pct",
+                    status="attention",
+                    badge="Behind typical",
+                    text=f"{where}. Crop cover of {canopy:.1f}% is below the {lo}-{hi}% usually seen at this age. "
+                    "Plants may be slow, gaps may need replanting, or the photo was taken from higher up than usual.",
+                )
+            )
+        elif canopy > hi:
+            items.append(
+                ContextItem(
+                    metric="canopy_cover_pct",
+                    status="typical",
+                    text=f"{where}. Crop cover of {canopy:.1f}% is above the {lo}-{hi}% usually seen at this age: "
+                    "strong growth, or a closer photo than usual.",
+                )
+            )
+        else:
+            items.append(
+                ContextItem(
+                    metric="canopy_cover_pct",
+                    status="typical",
+                    text=f"{where}. Crop cover of {canopy:.1f}% is within the {lo}-{hi}% usually seen at this age.",
+                )
+            )
 
     if quality["level"] == "low":
         problem = "blurry" if not quality["sharp"] else quality["exposure"].replace("_", " ")

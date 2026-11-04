@@ -55,6 +55,20 @@ class Settings:
     llm_price_in_per_m: float | None = _env_float("LLM_PRICE_IN_PER_M")  # USD per 1M input tokens
     llm_price_out_per_m: float | None = _env_float("LLM_PRICE_OUT_PER_M")  # USD per 1M output tokens
     llm_cache_dir: str = _env("LLM_CACHE_DIR", ".cache/llm")
+    # Muse Spark writes the plain-language summary (checked by the validator). 1 = on
+    enable_summary: bool = _env("ENABLE_SUMMARY", "1") == "1"
+
+    # "meta" = SAM 3.1 on Meta Model API. "offline" = color-based dev segmenter, NOT SAM: lets the
+    # app run without a key while developing; every result made with it is labelled as such.
+    sam_backend: str = _env("SAM_BACKEND", "meta")
+
+    # irrigation (Open-Meteo, no key)
+    weather_url: str | None = _env("WEATHER_URL")
+
+    # row video: frames sampled per second, and the most frames sent to SAM per video
+    video_fps: float = float(_env("VIDEO_FPS", "2"))
+    video_max_frames: int = int(_env("VIDEO_MAX_FRAMES", "40"))
+    video_max_side: int = int(_env("VIDEO_MAX_SIDE", "960"))
 
 
 settings = Settings()

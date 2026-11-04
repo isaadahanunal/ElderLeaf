@@ -24,27 +24,35 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .crops import CROPS, crop_label
+from .crops import CROPS, LIBRARY_NOTE, crop_info, crop_label
 from .db import Analysis, Note, Plot, get_db, init_db, new_id
+from .irrigation import water_need
 from .jobs import submit
-from .pipeline import get_sam, prepare_upload
+from .pipeline import current_strategy, get_llm, get_sam, prepare_upload, segmenter_name
 from .render import render_analysis, render_segmentation, to_png
 from .sam import CacheMiss
 from .schemas import (
     AnalysisOut,
     AnalysisResult,
     AnalysisSummary,
+    CompareOut,
     CropOut,
     NoteCreate,
     NoteOut,
     PlotCreate,
     PlotDetail,
     PlotOut,
+    Summary,
     TraceStep,
+    VideoResult,
 )
+from .summary import write_summary
+from .video import still_jpeg, to_web_mp4
 from .storage import LocalStorage, get_storage
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_VIDEO_BYTES = 150 * 1024 * 1024
+VIDEO_TYPES = {".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/mp4", ".webm": "video/webm"}
 
 
 @asynccontextmanager
@@ -103,7 +111,19 @@ def _attention(result: dict | None) -> list[str]:
 
 
 def _summary(a: Analysis, request: Request) -> AnalysisSummary:
-    metrics = (a.result or {}).get("metrics", {})
+    result = a.result or {}
+    if a.mode == "video":
+        return AnalysisSummary(
+            id=a.id,
+            mode="video",
+            captured_at=a.captured_at,
+            status=a.status,
+            image_url=_image_url(request, a.image_key),
+            summary=(result.get("context") or [{}])[0].get("text"),
+            row_plant_count=result.get("row_plant_count"),
+            attention=_attention(result),
+        )
+    metrics = result.get("metrics", {})
 
     def value(key: str):
         item = metrics.get(key)
@@ -114,16 +134,19 @@ def _summary(a: Analysis, request: Request) -> AnalysisSummary:
         captured_at=a.captured_at,
         status=a.status,
         image_url=_image_url(request, a.image_key),
+        summary=(result.get("summary") or {}).get("text"),
         plant_count=value("plant_count"),
         canopy_cover_pct=value("canopy_cover_pct"),
         weed_share_pct=value("weed_share_pct"),
         lesion_share_pct=value("lesion_share_pct"),
-        attention=_attention(a.result),
+        mean_plant_area=value("mean_plant_area"),
+        mean_plant_area_unit=(metrics.get("mean_plant_area") or {}).get("unit"),
+        attention=_attention(result),
     )
 
 
 def _plot_fields(plot: Plot, request: Request) -> dict:
-    done = [a for a in _ordered(plot.analyses) if a.status == "done"]
+    done = [a for a in _ordered(plot.analyses) if a.status == "done" and a.mode == "photo"]
     latest = done[-1] if done else None
     comparison = (latest.result or {}).get("comparison") if latest else None
     return {
@@ -153,16 +176,20 @@ def _analysis_out(a: Analysis, request: Request) -> AnalysisOut:
         if step.tool == "run_sam" and step.input and step.status == "done":
             step.image_url = f"{base}/analyses/{a.id}/sam.png?prompt={quote(step.input)}"
         steps.append(step)
+    video = a.mode == "video"
     return AnalysisOut(
         id=a.id,
         plot_id=a.plot_id,
+        mode=a.mode,
         captured_at=a.captured_at,
         status=a.status,
         error=a.error,
         image_url=_image_url(request, a.image_key),
-        overlay_url=f"{base}/analyses/{a.id}/overlay.png" if a.result else None,
+        video_url=_image_url(request, a.video_key) if video and a.video_key else None,
+        overlay_url=f"{base}/analyses/{a.id}/overlay.png" if a.result and not video else None,
         trace=steps,
-        result=AnalysisResult.model_validate(a.result) if a.result else None,
+        result=AnalysisResult.model_validate(a.result) if a.result and not video else None,
+        video_result=VideoResult.model_validate(a.result) if a.result and video else None,
     )
 
 
@@ -178,7 +205,14 @@ def _analysis_or_404(db: Session, analysis_id: str) -> Analysis:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "sam_configured": bool(settings.model_api_key), "lesion_enabled": settings.enable_lesion}
+    return {
+        "ok": True,
+        "sam_configured": bool(settings.model_api_key),
+        "segmenter": segmenter_name(),
+        "llm_configured": get_llm().configured,
+        "llm_provider": settings.llm_provider,
+        "lesion_enabled": settings.enable_lesion,
+    }
 
 
 @app.get("/crops", response_model=list[CropOut])
@@ -270,6 +304,56 @@ def create_analysis(
     return _analysis_out(analysis, request)
 
 
+@app.post("/plots/{plot_id}/videos", response_model=AnalysisOut, status_code=202)
+def create_video_analysis(
+    plot_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    captured_at: dt.date | None = Form(default=None),
+    device: str | None = Depends(device_id),
+    db: Session = Depends(get_db),
+):
+    """Upload a row-walk video (MP4/MOV, ~15 s). Returns `pending`; poll GET /analyses/{id}."""
+    plot = _plot_or_404(db, plot_id)
+    _require_owner(plot, device)
+    suffix = "." + (file.filename or "row.mp4").rsplit(".", 1)[-1].lower()
+    if suffix not in VIDEO_TYPES:
+        suffix = ".mp4"
+    data = file.file.read(MAX_VIDEO_BYTES + 1)
+    if len(data) > MAX_VIDEO_BYTES:
+        raise HTTPException(413, "Video is larger than 150 MB; record about 15 seconds.")
+    try:
+        still, width, height = still_jpeg(data, suffix)
+    except Exception:
+        raise HTTPException(400, "Could not read this file as a video (MP4 or MOV).") from None
+    analysis_id = new_id("a")
+    video_key = f"plots/{plot.id}/{analysis_id}{suffix}"
+    web = to_web_mp4(data, suffix)  # small H.264 copy every browser plays; keep only that
+    if web is not None:
+        data, suffix, video_key = web, ".mp4", f"plots/{plot.id}/{analysis_id}.web.mp4"
+    image_key = f"plots/{plot.id}/{analysis_id}.jpg"
+    storage = get_storage()
+    storage.put(video_key, data, VIDEO_TYPES[suffix])
+    storage.put(image_key, still, "image/jpeg")
+    analysis = Analysis(
+        id=analysis_id,
+        plot_id=plot.id,
+        mode="video",
+        captured_at=captured_at or dt.date.today(),
+        image_key=image_key,
+        video_key=video_key,
+        image_width=width,
+        image_height=height,
+        status="pending",
+        trace=[],
+    )
+    db.add(analysis)
+    db.commit()
+    submit(analysis.id)
+    db.refresh(analysis)
+    return _analysis_out(analysis, request)
+
+
 @app.get("/analyses/{analysis_id}", response_model=AnalysisOut)
 def get_analysis(analysis_id: str, request: Request, db: Session = Depends(get_db)):
     analysis = db.get(Analysis, analysis_id)
@@ -282,8 +366,8 @@ def get_analysis(analysis_id: str, request: Request, db: Session = Depends(get_d
 def analysis_overlay(analysis_id: str, db: Session = Depends(get_db)) -> Response:
     """The photo with the final masks, colored by class (crop green, weed magenta, A4 blue)."""
     analysis = _analysis_or_404(db, analysis_id)
-    if not analysis.result:
-        raise HTTPException(409, "Analysis is not finished yet.")
+    if not analysis.result or analysis.mode != "photo":
+        raise HTTPException(409, "No mask picture for this analysis.")
     rgb = np.array(Image.open(io.BytesIO(get_storage().get(analysis.image_key))).convert("RGB"))
     return Response(to_png(render_analysis(rgb, analysis.result)), media_type="image/png")
 
@@ -340,6 +424,8 @@ CSV_COLUMNS = [
     "mean_plant_area_unit",
     "image_quality",
     "consult_agronomist",
+    "row_plant_count",
+    "mode",
 ]
 
 
@@ -351,6 +437,9 @@ def export_csv(plot_id: str, db: Session = Depends(get_db)) -> Response:
     writer.writerow(CSV_COLUMNS)
     for a in _ordered(plot.analyses):
         if a.status != "done" or not a.result:
+            continue
+        if a.mode == "video":
+            writer.writerow([a.captured_at.isoformat(), a.id] + [""] * 8 + [a.result["row_plant_count"], "video"])
             continue
         m = a.result["metrics"]
 
@@ -369,6 +458,8 @@ def export_csv(plot_id: str, db: Session = Depends(get_db)) -> Response:
                 m["mean_plant_area"]["unit"],
                 a.result["image_quality"]["level"],
                 a.result["health"]["consult_agronomist"],
+                "",
+                "photo",
             ]
         )
     filename = re.sub(r"[^A-Za-z0-9_-]+", "-", plot.name).strip("-") or plot.id
@@ -376,4 +467,103 @@ def export_csv(plot_id: str, db: Session = Depends(get_db)) -> Response:
         content=buf.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )
+
+
+# ------------------------------------------------------------------ water, crop info, compare
+
+
+@app.get("/plots/{plot_id}/water")
+def todays_water(plot_id: str, db: Session = Depends(get_db)) -> dict:
+    """Today's water need from the latest crop cover (FAO-56, Open-Meteo ET0)."""
+    plot = _plot_or_404(db, plot_id)
+    done = [a for a in _ordered(plot.analyses) if a.status == "done" and a.mode == "photo"]
+    cover = done[-1].result["metrics"]["canopy_cover_pct"]["value"] if done else None
+    day = (dt.date.today() - plot.planted_on).days if plot.planted_on else None
+    out = water_need(plot.crop, day, cover, plot.area_m2, plot.lat, plot.lon)
+    out["based_on_analysis_id"] = done[-1].id if done else None
+    return out
+
+
+@app.get("/crops/{crop_id}/info")
+def crop_reference(crop_id: str, day: int) -> dict:
+    info = crop_info(crop_id, day)
+    if info is None:
+        raise HTTPException(404, "No reference values for this crop.")
+    return {**info, "note": LIBRARY_NOTE}
+
+
+COMPARE_ROWS = [
+    ("plant_count", "Plants", "plants"),
+    ("canopy_cover_pct", "Crop cover", "%"),
+    ("weed_share_pct", "Weed share", "%"),
+    ("lesion_share_pct", "Leaf spots", "%"),
+    ("mean_plant_area", "Mean plant size", None),
+]
+
+
+@app.get("/plots/{plot_id}/compare", response_model=CompareOut)
+def compare(plot_id: str, a: str, b: str, request: Request, db: Session = Depends(get_db)):
+    """Two dates of one plot: metric differences, notes in between and a validated change summary."""
+    plot = _plot_or_404(db, plot_id)
+    first, second = _analysis_or_404(db, a), _analysis_or_404(db, b)
+    if first.plot_id != plot.id or second.plot_id != plot.id:
+        raise HTTPException(404, "Both analyses must belong to this plot.")
+    if first.mode != "photo" or second.mode != "photo" or not (first.result and second.result):
+        raise HTTPException(409, "Compare needs two finished photo analyses.")
+    if (first.captured_at, first.created_at) > (second.captured_at, second.created_at):
+        first, second = second, first
+    days = (second.captured_at - first.captured_at).days
+    ma, mb = first.result["metrics"], second.result["metrics"]
+    rows = []
+    for key, label, unit in COMPARE_ROWS:
+        va, vb = (ma.get(key) or {}).get("value"), (mb.get(key) or {}).get("value")
+        unit = unit or (mb.get(key) or {}).get("unit")
+        if key == "mean_plant_area" and (ma.get(key) or {}).get("unit") != (mb.get(key) or {}).get("unit"):
+            va = None  # px vs cm² are not comparable
+        delta = None if va is None or vb is None else round(vb - va, 1)
+        per_day = None if delta is None or days <= 0 else round(delta / days, 2)
+        rows.append({"metric": key, "label": label, "unit": unit, "a": va, "b": vb, "delta": delta, "per_day": per_day})
+    notes = [
+        n
+        for n in sorted(plot.notes, key=lambda n: n.noted_on)
+        if first.captured_at < n.noted_on <= second.captured_at
+    ]
+    note_dicts = [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text} for n in notes]
+    lines = []
+    for r in rows:
+        if r["delta"] is None:
+            continue
+        if r["metric"] == "plant_count":
+            lines.append(f"Plant count went from {r['a']:g} to {r['b']:g}.")
+        elif r["metric"] in ("canopy_cover_pct", "weed_share_pct"):
+            lines.append(f"{r['label']} went from {r['a']:.1f}% to {r['b']:.1f}% in {days} days.")
+    facts = {
+        "crop": crop_label(plot.crop),
+        "days_between": days,
+        "dates": [first.captured_at.isoformat(), second.captured_at.isoformat()],
+        "rows": rows,
+        "context": [{"status": "info", "text": t} for t in lines],
+        "grower_notes_between": note_dicts,
+        "health": {"consult_agronomist": bool(second.result["health"]["consult_agronomist"])},
+    }
+    cache_key = f"{first.id}:{len(notes)}"
+    cached = (second.result.get("compare_cache") or {}).get(cache_key)
+    if cached:
+        summary = Summary(**cached)
+    else:
+        written = write_summary(get_llm() if current_strategy() == "agent" else None, facts)
+        summary = Summary(**written.to_dict())
+        if not plot.is_demo or written.source == "agent":  # remember agent text so the jury view costs nothing
+            result = dict(second.result)
+            result["compare_cache"] = {**(result.get("compare_cache") or {}), cache_key: summary.model_dump()}
+            second.result = result
+            db.commit()
+    return CompareOut(
+        a=_summary(first, request),
+        b=_summary(second, request),
+        days_between=days,
+        rows=rows,
+        notes_between=[NoteOut(id=n.id, kind=n.kind, date=n.noted_on, text=n.text) for n in notes],
+        summary=summary,
     )

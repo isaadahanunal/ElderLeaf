@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+:root {
+  --canvas: #f3f4f6;
+  --card: #ffffff;
+  --well: #f4f5f7;
+  --line: #e7e8ec;
+  --ink: #111114;
+  --ink-2: #3c3c43;
+  --muted: #85858f;
+  /* brand = the logo: deep forest green, sage leaf, gold veins, cream hand */
+  --brand: #1e4d36;
+  --brand-soft: #e8efe9;
+  --forest: #15251e;
+  --gold: #c39f64;
+  --sage: #788867;
+
+  /* one color per metric; validated on white (dataviz validator, contrast >= 3:1) */
+  --plants: #1f9d55;
+  --cover: #0891b2;
+  --weeds: #e8590c;
+  --water: #2563eb;
+  --health: #c2185b;
+  --spots: #7c4dcc;
+
+  --warn: #9a5b00;
+  --warn-soft: #fff4dc;
+  --good: #137a3e;
+  --good-soft: #e5f6eb;
+  --bad: #c0262d;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-well: var(--well);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-forest: var(--forest);
+  --color-gold: var(--gold);
+  --color-sage: var(--sage);
+  --color-plants: var(--plants);
+  --color-cover: var(--cover);
+  --color-weeds: var(--weeds);
+  --color-water: var(--water);
+  --color-health: var(--health);
+  --color-spots: var(--spots);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-bad: var(--bad);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.04);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-in {
+  animation: fade-up 220ms ease-out;
+}
+
+@keyframes ring-in {
+  from {
+    stroke-dashoffset: var(--ring-full);
+  }
+}
+
+.ring-value {
+  animation: ring-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+input[type="range"].compare-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
