@@ -267,9 +267,11 @@ class AnalysisResult(BaseModel):
     health: Health
     context: list[ContextItem]
     comparison: Comparison | None
-    crop_info: dict | None = Field(default=None, description="lookup_crop_info: FAO-56 stage, Kc, expected cover")
-    irrigation: dict | None = None
-    summary: Summary | None = None
+    irrigation: Irrigation | dict | None = Field(default=None, description="dict: analyses made before the report agent")
+    report: Report | None = None
+    # analyses made before the report agent (still shown in the logbook)
+    crop_info: dict | None = Field(default=None, description="FAO-56 stage, Kc, expected cover")
+    summary: Summary | None = Field(default=None, description="plain-language summary, now part of `report`")
     notes_since_previous: list[dict] = []
     run_stats: RunStats | None = None
     agent_trace: list[TraceStep]
@@ -391,13 +393,38 @@ class PlotDetail(PlotOut):
     notes: list[NoteOut]
 
 
+class CompareSide(BaseModel):
+    analysis_id: str
+    captured_at: dt.date
+    days_after_planting: int | None
+    image_url: str
+    overlay_url: str | None
+
+
+class CompareRow(BaseModel):
+    metric: str
+    label: str
+    unit: str | None
+    before: float | None
+    after: float | None
+    change: float | None
+    per_day: float | None = Field(description="change / days between the photos")
+
+
 class CompareOut(BaseModel):
-    a: AnalysisSummary
-    b: AnalysisSummary
+    """The plan's Compare tab: two photos of one plot, a difference table, notes in between, agent summary."""
+
+    plot_id: str
+    before: CompareSide
+    after: CompareSide
     days_between: int
-    rows: list[dict] = Field(description="metric, label, unit, a, b, delta, per_day")
-    notes_between: list[NoteOut]
-    summary: Summary
+    rows: list[CompareRow]
+    by_crop: list[dict] = Field(default=[], description="mixed beds: crop, label, before, after, change (plant counts)")
+    notes: list[NoteOut] = Field(description="the grower's notes between the two photos")
+    summary: str
+    next_step: str | None = None
+    written_by: Literal["agent", "template"]
+    validator: dict
 
 
 # ------------------------------------------------------------------ accounts

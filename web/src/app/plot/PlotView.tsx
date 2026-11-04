@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AnalysisOut, AnalysisSummary, api, CompareOut, fmt, fmtDate, Irrigation, Note, PlotDetail, today } from "@/lib/api";
 import { MaskOverlay } from "@/components/MaskOverlay";
-import { AssistantCard, CoverCard, PlantsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
+import { AssistantCard, assistantText, CoverCard, PlantsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
+import { Sheet } from "@/components/Sheet";
 import { TrendCharts } from "@/components/TrendCharts";
 import { IconCamera, IconChevronRight, IconDownload, IconDroplet, IconNote, IconVideo } from "@/components/icons";
 import {
@@ -60,34 +61,50 @@ export function PlotView() {
     );
 
   const photos = plot.analyses.filter((a) => a.mode === "photo" && a.status === "done");
+  const cover = photos.at(-1)?.image_url ?? plot.latest?.image_url;
+  const meta = [
+    plot.crop_label,
+    plot.days_after_planting !== null ? `day ${plot.days_after_planting}` : null,
+    plot.area_m2 ? `${plot.area_m2} m²` : null,
+    plot.planted_on ? `planted ${fmtDate(plot.planted_on)}` : null,
+  ].filter(Boolean);
   return (
     <>
-      <BackLink href="/" label="All plots" />
-      <PageHead
-        title={plot.name}
-        chips={
-          <>
-            <Chip tone="brand">{plot.crop_label}</Chip>
-            {plot.days_after_planting !== null && <Chip>Day {plot.days_after_planting}</Chip>}
-            {plot.area_m2 && <Chip>{plot.area_m2} m²</Chip>}
-            {plot.planted_on && <Chip>Planted {fmtDate(plot.planted_on)}</Chip>}
-            {plot.is_demo && <Chip tone="dark">Demo · read-only</Chip>}
-          </>
-        }
-        actions={
-          !plot.is_demo && (
-            <>
-              <LinkButton href={`/analyze?plot=${plot.id}&mode=video`} variant="white">
+      {/* cover: the latest photo with the plot's name on it */}
+      <section className="relative -mx-4 -mt-5 overflow-hidden bg-forest sm:mx-0 sm:mt-0 sm:rounded-[32px]">
+        {cover ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={cover} alt="" className="h-[270px] w-full object-cover sm:h-[320px]" />
+        ) : (
+          <div className="forest-panel h-[220px] w-full">
+            <div className="leaf-veins h-full w-full" />
+          </div>
+        )}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0c1511]/90 via-[#0c1511]/30 to-[#0c1511]/10" />
+        <Link href="/" aria-label="All plots" className="glass absolute left-4 top-4 grid h-10 w-10 place-items-center rounded-full text-white">
+          <IconChevronRight size={18} className="rotate-180" />
+        </Link>
+        {plot.is_demo && <span className="glass absolute right-4 top-4 rounded-full px-3 py-1.5 text-xs font-semibold text-white">Demo · read-only</span>}
+        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3 px-5 pb-5 sm:flex-row sm:items-end sm:justify-between sm:px-7 sm:pb-6">
+          <div className="min-w-0 text-white">
+            <h1 className="font-display line-clamp-2 text-[32px] font-semibold leading-[1.05] sm:text-[38px]">{plot.name}</h1>
+            <p className="mt-1.5 text-sm text-white/75">{meta.join(" · ")}</p>
+          </div>
+          {!plot.is_demo && (
+            <div className="flex shrink-0 gap-2">
+              <LinkButton href={`/analyze?plot=${plot.id}`} variant="gold">
+                <IconCamera size={16} /> Take photo
+              </LinkButton>
+              <LinkButton href={`/analyze?plot=${plot.id}&mode=video`} variant="glass">
                 <IconVideo size={16} /> Row video
               </LinkButton>
-              <LinkButton href={`/analyze?plot=${plot.id}`}>
-                <IconCamera size={16} /> Analyze photo
-              </LinkButton>
-            </>
-          )
-        }
-      />
-      <div className="mb-6">
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* tabs stay in reach while you scroll */}
+      <div className="sticky top-[calc(env(safe-area-inset-top)+61px)] z-20 -mx-4 mb-6 bg-canvas/90 px-4 py-3 backdrop-blur-xl lg:top-0 lg:mx-0 lg:px-0">
         <Segmented
           options={[
             { id: "overview", label: "Overview" },
@@ -131,7 +148,7 @@ function Overview({ plot }: { plot: PlotDetail }) {
   const photos = plot.analyses.filter((a) => a.mode === "photo" && a.status === "done");
   const latestPhoto = photos.at(-1);
   const [latest, setLatest] = useState<AnalysisOut | null>(null);
-  const [water, setWater] = useState<Irrigation | null>(null);
+  const [water, setWater] = useState<Irrigation | null | undefined>(undefined);
 
   useEffect(() => {
     if (latestPhoto) api.analysis(latestPhoto.id).then(setLatest, () => setLatest(null));
@@ -175,7 +192,7 @@ function Overview({ plot }: { plot: PlotDetail }) {
               Open analysis <IconChevronRight size={14} />
             </Link>
           </div>
-          {r?.summary ? <AssistantCard s={r.summary} consult={r.health.consult_agronomist} /> : <Skeleton className="h-64" />}
+          {!r ? <Skeleton className="h-64" /> : assistantText(r) ? <AssistantCard s={assistantText(r)!} consult={r.health.consult_agronomist} /> : <div />}
         </div>
       )}
 
@@ -213,6 +230,7 @@ const NOTE_KINDS: { id: string; label: string; m: MetricKey }[] = [
 type Row = { type: "analysis"; date: string; a: AnalysisSummary } | { type: "note"; date: string; n: Note };
 
 function Logbook({ plot, onChange }: { plot: PlotDetail; onChange: () => void }) {
+  const [noteOpen, setNoteOpen] = useState(false);
   const rows = useMemo(() => {
     const items: Row[] = [
       ...plot.analyses.map((a) => ({ type: "analysis" as const, date: a.captured_at, a })),
@@ -227,12 +245,26 @@ function Logbook({ plot, onChange }: { plot: PlotDetail; onChange: () => void })
         {rows.length === 0 && <p className="text-sm text-muted">Nothing here yet.</p>}
         {rows.map((row) => (row.type === "analysis" ? <EntryCard key={row.a.id} a={row.a} /> : <NoteCard key={row.n.id} n={row.n} />))}
       </div>
-      <div className="order-1 space-y-4 lg:order-2">
-        {!plot.is_demo && <NoteForm plotId={plot.id} onSaved={onChange} />}
-        <LinkButton href={api.csvUrl(plot.id)} external variant="white" className="w-full">
+      <div className="order-1 flex gap-2 lg:order-2 lg:flex-col">
+        {!plot.is_demo && (
+          <Button onClick={() => setNoteOpen(true)} className="flex-1 lg:flex-none">
+            <IconNote size={16} /> Add a note
+          </Button>
+        )}
+        <LinkButton href={api.csvUrl(plot.id)} external variant="white" className="flex-1 lg:flex-none">
           <IconDownload size={16} /> Export CSV
         </LinkButton>
       </div>
+      <Sheet open={noteOpen} onClose={() => setNoteOpen(false)} title="Add a note" subtitle="Watering, fertilizer, spraying or what you saw">
+        <NoteForm
+          plotId={plot.id}
+          bare
+          onSaved={() => {
+            setNoteOpen(false);
+            onChange();
+          }}
+        />
+      </Sheet>
     </div>
   );
 }
@@ -309,7 +341,7 @@ function NoteCard({ n }: { n: Note }) {
   );
 }
 
-function NoteForm({ plotId, onSaved }: { plotId: string; onSaved: () => void }) {
+function NoteForm({ plotId, onSaved, bare = false }: { plotId: string; onSaved: () => void; bare?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState("watering");
@@ -329,9 +361,7 @@ function NoteForm({ plotId, onSaved }: { plotId: string; onSaved: () => void }) 
       setBusy(false);
     }
   }
-  return (
-    <Card>
-      <div className="mb-3 text-[15px] font-bold">Add a note</div>
+  const form = (
       <form onSubmit={submit} className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
           {NOTE_KINDS.map((k) => (
@@ -354,6 +384,12 @@ function NoteForm({ plotId, onSaved }: { plotId: string; onSaved: () => void }) 
         </div>
         {error && <ErrorBox message={error} />}
       </form>
+  );
+  if (bare) return form;
+  return (
+    <Card>
+      <div className="mb-3 text-[15px] font-bold">Add a note</div>
+      {form}
     </Card>
   );
 }
@@ -386,19 +422,27 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
     }
   }, [aId, bId, plot.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const older = cmp ? full[cmp.a.id] : undefined;
-  const newer = cmp ? full[cmp.b.id] : undefined;
+  // a tapped photo replaces the nearer of the two dates, so "before" always stays older than "after"
+  function pick(id: string) {
+    const i = photos.findIndex((p) => p.id === id);
+    const ia = photos.findIndex((p) => p.id === aId);
+    const ib = photos.findIndex((p) => p.id === bId);
+    if (i === ia || i === ib) return;
+    if (i < ia || (i < ib && i - ia <= ib - i)) setAId(id);
+    else setBId(id);
+  }
+
+  const older = cmp ? full[cmp.before.analysis_id] : undefined;
+  const newer = cmp ? full[cmp.after.analysis_id] : undefined;
   const visible = useMemo(() => new Set(["crop", "weed", "lesion"]), []);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <DatePick value={aId} onChange={setAId} photos={photos} />
-        <IconChevronRight size={16} className="text-muted" />
-        <DatePick value={bId} onChange={setBId} photos={photos} />
-        {cmp && <Chip>{cmp.days_between} days apart</Chip>}
-      </div>
-      {aId === bId && <p className="text-sm text-muted">Pick two different dates.</p>}
+      <PhotoStrip photos={photos} before={aId} after={bId} onPick={pick} />
+      <p className="text-[13px] text-muted">
+        {cmp ? `${cmp.days_between} days apart. ` : ""}
+        {photos.length > 2 ? "Tap a photo to compare it." : ""}
+      </p>
       {error && <ErrorBox message={error} />}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
@@ -418,8 +462,8 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
                   </svg>
                 </span>
               </div>
-              <span className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.a.captured_at)}</span>
-              <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.b.captured_at)}</span>
+              <span className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.before.captured_at)}</span>
+              <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.after.captured_at)}</span>
               <input
                 type="range"
                 min={0}
@@ -440,11 +484,11 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
               <div className="mb-1 text-[15px] font-bold">What changed</div>
               <div className="divide-y divide-line">
                 {cmp.rows
-                  .filter((r) => r.a !== null || r.b !== null)
+                  .filter((r) => r.before !== null || r.after !== null)
                   .map((r) => {
                     const m = COMPARE_META[r.metric] ?? "plants";
                     const u = r.unit === "cm2" ? " cm²" : r.unit === "%" ? "%" : r.unit === "px" ? " px" : "";
-                    const max = Math.max(r.a ?? 0, r.b ?? 0, 1e-9);
+                    const max = Math.max(r.before ?? 0, r.after ?? 0, 1e-9);
                     return (
                       <div key={r.metric} className="py-3">
                         <div className="flex items-center justify-between gap-2">
@@ -454,17 +498,17 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
                           </span>
                           <span className="flex items-center gap-2">
                             <span className="tabular text-sm font-bold">
-                              {r.b === null ? "–" : `${fmt(r.b)}${u}`}
+                              {r.after === null ? "–" : `${fmt(r.after)}${u}`}
                             </span>
-                            <Delta value={r.delta} unit={u === "%" ? " pts" : ""} invert={r.metric === "weed_share_pct" || r.metric === "lesion_share_pct"} />
+                            <Delta value={r.change} unit={u === "%" ? " pts" : ""} invert={r.metric === "weed_share_pct" || r.metric === "lesion_share_pct"} />
                           </span>
                         </div>
                         <div className="mt-2 space-y-1">
                           <div className="h-1.5 rounded-full bg-[#efebe3]">
-                            <div className="h-1.5 rounded-full bg-[#c9ccd3]" style={{ width: `${((r.a ?? 0) / max) * 100}%` }} />
+                            <div className="h-1.5 rounded-full bg-[#c9ccd3]" style={{ width: `${((r.before ?? 0) / max) * 100}%` }} />
                           </div>
                           <div className="h-1.5 rounded-full bg-[#efebe3]">
-                            <div className="h-1.5 rounded-full" style={{ width: `${((r.b ?? 0) / max) * 100}%`, background: METRIC[m].hex }} />
+                            <div className="h-1.5 rounded-full" style={{ width: `${((r.after ?? 0) / max) * 100}%`, background: METRIC[m].hex }} />
                           </div>
                         </div>
                       </div>
@@ -473,10 +517,10 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
               </div>
               <div className="mt-2 flex gap-4 text-xs text-muted">
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-4 rounded-full bg-[#c9ccd3]" /> {fmtDate(cmp.a.captured_at)}
+                  <span className="h-1.5 w-4 rounded-full bg-[#c9ccd3]" /> {fmtDate(cmp.before.captured_at)}
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-4 rounded-full bg-ink" /> {fmtDate(cmp.b.captured_at)}
+                  <span className="h-1.5 w-4 rounded-full bg-ink" /> {fmtDate(cmp.after.captured_at)}
                 </span>
               </div>
             </Card>
@@ -485,12 +529,12 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
       </div>
       {cmp && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <AssistantCard s={cmp.summary} title="Change summary" compact />
-          {cmp.notes_between.length > 0 && (
+          <AssistantCard s={{ text: cmp.summary, next_step: cmp.next_step, source: cmp.written_by, attempts: cmp.validator.attempts, validator_issues: [], error: null }} title="Change summary" compact />
+          {cmp.notes.length > 0 && (
             <Card>
               <div className="mb-3 text-[15px] font-bold">Your notes in between</div>
               <div className="space-y-2">
-                {cmp.notes_between.map((n) => (
+                {cmp.notes.map((n) => (
                   <NoteCard key={n.id} n={n} />
                 ))}
               </div>
@@ -502,14 +546,32 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
   );
 }
 
-function DatePick({ value, onChange, photos }: { value: string; onChange: (v: string) => void; photos: AnalysisSummary[] }) {
+function PhotoStrip({ photos, before, after, onPick }: { photos: AnalysisSummary[]; before: string; after: string; onPick: (id: string) => void }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="h-10 rounded-full bg-card px-4 text-sm font-semibold shadow-[var(--shadow-card)] outline-none">
-      {photos.map((p) => (
-        <option key={p.id} value={p.id}>
-          {fmtDate(p.captured_at)}
-        </option>
-      ))}
-    </select>
+    <div className="-mx-4 overflow-x-auto px-4 pb-1 lg:mx-0 lg:px-0">
+      <div className="flex gap-3">
+        {photos.map((p) => {
+          const role = p.id === before ? "Before" : p.id === after ? "After" : null;
+          return (
+            <button key={p.id} type="button" onClick={() => onPick(p.id)} aria-pressed={role !== null} className="shrink-0 active:scale-95">
+              <span
+                className={`relative block h-[78px] w-[78px] overflow-hidden rounded-2xl ring-offset-2 ring-offset-canvas transition ${
+                  role === "After" ? "ring-[3px] ring-brand" : role === "Before" ? "ring-[3px] ring-[#8a8f95]" : "opacity-60"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.image_url} alt="" className="h-full w-full object-cover" />
+                {role && (
+                  <span className={`absolute inset-x-0 bottom-0 py-0.5 text-center text-[10px] font-bold uppercase tracking-wide text-white ${role === "After" ? "bg-brand" : "bg-[#14181a]/70"}`}>
+                    {role}
+                  </span>
+                )}
+              </span>
+              <span className={`mt-1.5 block text-center text-xs font-semibold ${role ? "text-ink" : "text-muted"}`}>{fmtDate(p.captured_at)}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

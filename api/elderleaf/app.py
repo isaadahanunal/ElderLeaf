@@ -361,7 +361,7 @@ def list_plots(request: Request, device: str | None = Depends(owner), db: Sessio
 @app.post("/plots", response_model=PlotOut, status_code=201)
 def create_plot(body: PlotCreate, request: Request, device: str | None = Depends(owner), db: Session = Depends(get_db)):
     if not device:
-        raise HTTPException(400, "Send an X-Device-Id header.")
+        raise HTTPException(400, "Send an X-Device-Id header or sign in.")
     unknown = [c for c in [body.crop, *body.other_crops] if c not in CROPS]
     if unknown:
         raise HTTPException(422, f"Unknown crop(s) {unknown}; see GET /crops.")
@@ -704,68 +704,3 @@ COMPARE_ROWS = [
 ]
 
 
-@app.get("/plots/{plot_id}/compare", response_model=CompareOut)
-def compare(plot_id: str, a: str, b: str, request: Request, db: Session = Depends(get_db)):
-    """Two dates of one plot: metric differences, notes in between and a validated change summary."""
-    plot = _plot_or_404(db, plot_id)
-    first, second = _analysis_or_404(db, a), _analysis_or_404(db, b)
-    if first.plot_id != plot.id or second.plot_id != plot.id:
-        raise HTTPException(404, "Both analyses must belong to this plot.")
-    if first.mode != "photo" or second.mode != "photo" or not (first.result and second.result):
-        raise HTTPException(409, "Compare needs two finished photo analyses.")
-    if (first.captured_at, first.created_at) > (second.captured_at, second.created_at):
-        first, second = second, first
-    days = (second.captured_at - first.captured_at).days
-    ma, mb = first.result["metrics"], second.result["metrics"]
-    rows = []
-    for key, label, unit in COMPARE_ROWS:
-        va, vb = (ma.get(key) or {}).get("value"), (mb.get(key) or {}).get("value")
-        unit = unit or (mb.get(key) or {}).get("unit")
-        if key == "mean_plant_area" and (ma.get(key) or {}).get("unit") != (mb.get(key) or {}).get("unit"):
-            va = None  # px vs cm² are not comparable
-        delta = None if va is None or vb is None else round(vb - va, 1)
-        per_day = None if delta is None or days <= 0 else round(delta / days, 2)
-        rows.append({"metric": key, "label": label, "unit": unit, "a": va, "b": vb, "delta": delta, "per_day": per_day})
-    notes = [
-        n
-        for n in sorted(plot.notes, key=lambda n: n.noted_on)
-        if first.captured_at < n.noted_on <= second.captured_at
-    ]
-    note_dicts = [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text} for n in notes]
-    lines = []
-    for r in rows:
-        if r["delta"] is None:
-            continue
-        if r["metric"] == "plant_count":
-            lines.append(f"Plant count went from {r['a']:g} to {r['b']:g}.")
-        elif r["metric"] in ("canopy_cover_pct", "weed_share_pct"):
-            lines.append(f"{r['label']} went from {r['a']:.1f}% to {r['b']:.1f}% in {days} days.")
-    facts = {
-        "crop": crop_label(plot.crop),
-        "days_between": days,
-        "dates": [first.captured_at.isoformat(), second.captured_at.isoformat()],
-        "rows": rows,
-        "context": [{"status": "info", "text": t} for t in lines],
-        "grower_notes_between": note_dicts,
-        "health": {"consult_agronomist": bool(second.result["health"]["consult_agronomist"])},
-    }
-    cache_key = f"{first.id}:{len(notes)}"
-    cached = (second.result.get("compare_cache") or {}).get(cache_key)
-    if cached:
-        summary = Summary(**cached)
-    else:
-        written = write_summary(get_llm() if current_strategy() == "agent" else None, facts)
-        summary = Summary(**written.to_dict())
-        if not plot.is_demo or written.source == "agent":  # remember agent text so the jury view costs nothing
-            result = dict(second.result)
-            result["compare_cache"] = {**(result.get("compare_cache") or {}), cache_key: summary.model_dump()}
-            second.result = result
-            db.commit()
-    return CompareOut(
-        a=_summary(first, request),
-        b=_summary(second, request),
-        days_between=days,
-        rows=rows,
-        notes_between=[NoteOut(id=n.id, kind=n.kind, date=n.noted_on, text=n.text) for n in notes],
-        summary=summary,
-    )

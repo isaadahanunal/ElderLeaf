@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
-const fraunces = Fraunces({ variable: "--font-fraunces", subsets: ["latin"], axes: ["SOFT", "WONK", "opsz"] });
+const serif = Newsreader({ variable: "--font-serif", subsets: ["latin", "latin-ext"], axes: ["opsz"] });
 
 export const metadata: Metadata = {
   title: "ElderLeaf",
@@ -30,7 +30,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geist.variable} ${geistMono.variable} ${fraunces.variable} antialiased`}>
+    <html lang="en" className={`${geist.variable} ${geistMono.variable} ${serif.variable} antialiased`}>
       <body>
         <AppShell>{children}</AppShell>
       </body>

@@ -349,6 +349,34 @@ export function Avatar({ name, size = 40, className = "" }: { name?: string | nu
   );
 }
 
+/** A number that climbs from 0 when it first appears (the result "moment"). */
+export function CountUp({ value, duration = 1400, decimals = 0 }: { value: number; duration?: number; decimals?: number }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setShown(value);
+      return;
+    }
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const p = Math.min(1, (performance.now() - t0) / duration);
+      setShown(value * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const end = setTimeout(() => {
+      cancelAnimationFrame(raf);
+      setShown(value); // never stop short if animation frames are paused
+    }, duration + 80);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(end);
+    };
+  }, [value, duration]);
+  return <>{decimals ? shown.toFixed(decimals) : Math.round(shown)}</>;
+}
+
 // ------------------------------------------------------------------ misc
 
 export function Spinner({ className = "" }: { className?: string }) {

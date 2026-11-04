@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { api, EXPERIENCE, Experience, fmtDate, isNativeApp } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PLOTS_CHANGED } from "@/components/AppShell";
+import { forgetWelcome, PLOTS_CHANGED } from "@/components/AppShell";
 import { ServerSettings } from "@/components/ServerSettings";
 import { IconBook, IconCamera, IconCheck, IconChevronRight, IconLogout, IconNote, IconSparkle, IconSprout, IconUser, IconVideo } from "@/components/icons";
 import { Avatar, Button, Card, ErrorBox, Field, inputClass, LinkButton, PageHead, SectionTitle, Skeleton, Spinner } from "@/components/ui";
@@ -65,8 +65,9 @@ function SignOut() {
   async function signOut() {
     setLeaving(true);
     await api.logOut();
+    forgetWelcome(); // back to the sign-in screen, where "Skip" still lets you continue as a guest
     window.dispatchEvent(new Event(PLOTS_CHANGED));
-    router.replace("/");
+    router.replace("/login?welcome=1&mode=signin");
   }
   return (
     <Button variant="secondary" size="lg" onClick={signOut} disabled={leaving} className="mt-8 w-full !text-bad sm:w-auto">

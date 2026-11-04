@@ -2,24 +2,32 @@
 
 import Link from "next/link";
 import { ReactNode } from "react";
+import { openCaptureSheet, openNewPlotSheet } from "@/components/AppShell";
 import { IconAlert, IconCamera, IconCheck, IconChevronRight, IconFlag, IconPlus, IconVideo } from "@/components/icons";
-import { METRIC, MetricKey, SectionTitle } from "@/components/ui";
+import { Button, METRIC, MetricKey, SectionTitle } from "@/components/ui";
 
-const STEPS: { title: string; text: string; icon: ReactNode }[] = [
+// each step is a shortcut: a link (href) or the camera sheet (camera)
+const STEPS: { title: string; text: string; icon: ReactNode; cta: string; href?: string; camera?: boolean; newPlot?: boolean }[] = [
   {
     title: "Add your plot",
     text: "Give it a name, pick the crop and the day you planted it. The planting day is how ElderLeaf knows what is normal for your plants' age.",
     icon: <IconPlus size={20} strokeWidth={2.2} />,
+    cta: "Add a plot",
+    newPlot: true,
   },
   {
     title: "Take one photo from above",
     text: "Stand at the same spot every time (a stake or a stone helps), hold the phone flat about 1–1.5 m over the bed, and put an A4 sheet in the frame to get sizes in cm².",
     icon: <IconCamera size={20} />,
+    cta: "Open the camera",
+    camera: true,
   },
   {
     title: "Come back every week",
     text: "Each photo goes into the plot's logbook with your notes. Compare two dates side by side to see how much your plants grew.",
     icon: <IconCheck size={20} strokeWidth={2.4} />,
+    cta: "See what is due today",
+    href: "/today",
   },
 ];
 
@@ -69,18 +77,37 @@ export function GuideView() {
       <section className="mt-10">
         <SectionTitle>Start in three steps</SectionTitle>
         <ol className="stagger space-y-3">
-          {STEPS.map((s, i) => (
-            <li key={s.title} className="flex gap-4 rounded-[22px] bg-card p-4 shadow-[var(--shadow-card)]">
-              <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand text-[#f6efe2]">
-                {s.icon}
-                <span className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-gold text-[11px] font-bold text-forest">{i + 1}</span>
-              </span>
-              <div>
-                <div className="text-[16px] font-semibold">{s.title}</div>
-                <p className="mt-0.5 text-sm leading-relaxed text-ink-2">{s.text}</p>
-              </div>
-            </li>
-          ))}
+          {STEPS.map((s, i) => {
+            const body = (
+              <>
+                <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand text-[#f6efe2]">
+                  {s.icon}
+                  <span className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-gold text-[11px] font-bold text-forest">{i + 1}</span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[16px] font-semibold">{s.title}</span>
+                  <span className="mt-0.5 block text-sm leading-relaxed text-ink-2">{s.text}</span>
+                  <span className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-brand">
+                    {s.cta} <IconChevronRight size={14} />
+                  </span>
+                </span>
+              </>
+            );
+            const cls = "flex w-full gap-4 rounded-[22px] bg-card p-4 text-left shadow-[var(--shadow-card)] transition hover:shadow-md active:scale-[0.99]";
+            return (
+              <li key={s.title}>
+                {s.href ? (
+                  <Link href={s.href} className={cls}>
+                    {body}
+                  </Link>
+                ) : (
+                  <button type="button" onClick={() => (s.newPlot ? openNewPlotSheet() : openCaptureSheet())} className={cls}>
+                    {body}
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ol>
       </section>
 
@@ -122,6 +149,9 @@ export function GuideView() {
               </li>
             ))}
           </ul>
+          <Button variant="secondary" onClick={() => openCaptureSheet()} className="mt-4">
+            <IconCamera size={16} /> Take a photo
+          </Button>
         </div>
         <div className="rounded-[22px] bg-card p-5 shadow-[var(--shadow-card)]">
           <div className="flex items-center gap-2 text-[16px] font-semibold">
@@ -131,6 +161,9 @@ export function GuideView() {
             A photo only covers part of a bed. Switch to <b>Row video</b> and walk slowly along one row for about 15 seconds, phone low, without turning back. Every
             plant gets a number and is counted once.
           </p>
+          <Button variant="secondary" onClick={() => openCaptureSheet("video")} className="mt-4">
+            <IconVideo size={16} /> Film a row
+          </Button>
         </div>
       </section>
 

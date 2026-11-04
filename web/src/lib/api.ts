@@ -76,8 +76,13 @@ export interface Summary {
   error: string | null;
 }
 
+/** Water need. Analyses carry the report agent's estimate (no `available` field, null when there is no weather);
+ * GET /plots/{id}/water answers with `available` and a `reason` when it can't estimate. */
 export interface Irrigation {
-  available: boolean;
+  available?: boolean;
+  text?: string;
+  source?: string;
+  kc_stage?: number | null;
   reason?: string;
   date?: string;
   et0_mm?: number;
@@ -92,6 +97,16 @@ export interface Irrigation {
   plot_total_liters?: number | null;
   how?: string;
   rain_note?: string | null;
+}
+
+/** The report agent's combined report (Markdown) with its headline and next steps. */
+export interface Report {
+  headline: string;
+  next_steps: string[];
+  markdown: string;
+  written_by: "agent" | "template";
+  validator: { passed: boolean; attempts: number; errors: string[] };
+  looked_closer: string | null;
 }
 
 export interface AnalysisResult {
@@ -135,7 +150,7 @@ export interface AnalysisResult {
     growth_rate: Record<string, number>;
     summary: string;
   } | null;
-  crop_info: {
+  crop_info?: {
     stage: string;
     stage_start_day: number;
     stage_end_day: number;
@@ -144,10 +159,12 @@ export interface AnalysisResult {
     source: string;
   } | null;
   irrigation: Irrigation | null;
-  summary: Summary | null;
-  notes_since_previous: { date: string; kind: string; text: string }[];
+  report?: Report | null;
+  // analyses made before the report agent
+  summary?: Summary | null;
+  notes_since_previous?: { date: string; kind: string; text: string }[];
   run_stats: {
-    strategy: "agent" | "fixed";
+    strategy: "agent" | "scan" | "fixed";
     scene: string | null;
     sam_calls: number;
     sam_cost_usd: number;
@@ -238,13 +255,27 @@ export interface PlotDetail extends Plot {
   notes: Note[];
 }
 
+export interface CompareSide {
+  analysis_id: string;
+  captured_at: string;
+  days_after_planting: number | null;
+  image_url: string;
+  overlay_url: string | null;
+}
+
+/** GET /plots/{id}/compare: the earlier photo is "before". The summary is written by the report agent (or a template). */
 export interface CompareOut {
-  a: AnalysisSummary;
-  b: AnalysisSummary;
+  plot_id: string;
+  before: CompareSide;
+  after: CompareSide;
   days_between: number;
-  rows: { metric: string; label: string; unit: string; a: number | null; b: number | null; delta: number | null; per_day: number | null }[];
-  notes_between: Note[];
-  summary: Summary;
+  rows: { metric: string; label: string; unit: string | null; before: number | null; after: number | null; change: number | null; per_day: number | null }[];
+  by_crop: { crop: string; label: string; before: number | null; after: number | null; change: number | null }[];
+  notes: Note[];
+  summary: string;
+  next_step: string | null;
+  written_by: "agent" | "template";
+  validator: { passed: boolean; attempts: number; errors: string[] };
 }
 
 export type Experience = "just_started" | "few_seasons" | "experienced";

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, AUTH_CHANGED, fmt, Irrigation, Plot } from "@/lib/api";
 import { firstName, useAuth } from "@/lib/auth";
+import { openNewPlotSheet } from "@/components/AppShell";
 import { IconAlert, IconCamera, IconCheck, IconChevronRight, IconDroplet, IconPlus } from "@/components/icons";
-import { Chip, ErrorBox, LinkButton, Notice, SectionTitle, Skeleton } from "@/components/ui";
+import { Button, Chip, ErrorBox, Notice, SectionTitle, Skeleton } from "@/components/ui";
 
 const PHOTO_EVERY_DAYS = 6; // a weekly photo keeps the logbook useful
 
@@ -67,9 +68,9 @@ export function TodayView() {
           {demo && (
             <Notice tone="info">
               This is the demo garden.{" "}
-              <Link href="/new" className="font-semibold underline underline-offset-2">
+              <button type="button" onClick={() => openNewPlotSheet()} className="font-semibold underline underline-offset-2">
                 Add your own plot
-              </Link>{" "}
+              </button>{" "}
               to plan your day here.
             </Notice>
           )}
@@ -162,9 +163,9 @@ export function TodayView() {
             <div className="flex flex-col items-center rounded-[28px] border-2 border-dashed border-[#dcd5c8] bg-card/60 px-6 py-12 text-center">
               <p className="font-display text-[22px] font-semibold">Nothing planted yet</p>
               <p className="mt-1 max-w-sm text-sm text-muted">Add a plot and take its first photo. Each day this page tells you how much to water and what to check.</p>
-              <LinkButton href="/new" className="mt-5">
+              <Button onClick={() => openNewPlotSheet()} className="mt-5">
                 <IconPlus size={16} strokeWidth={2.4} /> New plot
-              </LinkButton>
+              </Button>
             </div>
           )}
         </div>
