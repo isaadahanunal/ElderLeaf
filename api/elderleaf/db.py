@@ -152,6 +152,7 @@ def _add_missing_columns() -> None:
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
     if engine.dialect.name == "postgresql":
         # Supabase publishes the public schema through its REST API. Row level security with no policies
         # closes that door: only this server, which owns the tables, can read them (password hashes included).

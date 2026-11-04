@@ -197,11 +197,13 @@ export function SpotsCard({ value, how, onShow, active }: { value: number | null
   );
 }
 
-export function WaterCard({ w }: { w: Irrigation | null }) {
+/** `w` undefined = still loading; null = no estimate (no location or no weather). */
+export function WaterCard({ w }: { w: Irrigation | null | undefined }) {
+  const ok = Boolean(w && (w.available ?? w.liters_per_m2 !== undefined));
   return (
     <Card>
-      <CardHead m="water" title="Water today" right={w?.available && w.how ? <InfoTip>{`${w.how} FAO-56 method: a sparse plot uses less water than a full one, so the crop coefficient is scaled by the measured crop cover.`}</InfoTip> : undefined} />
-      {w?.available ? (
+      <CardHead m="water" title="Water today" right={ok && w?.how ? <InfoTip>{`${w.how} FAO-56 method: a sparse plot uses less water than a full one, so the crop coefficient is scaled by the measured crop cover.`}</InfoTip> : undefined} />
+      {ok && w ? (
         <>
           <BigNumber value={fmt(w.liters_per_m2)} unit=" L/m²" />
           <div className="mt-2 text-xs text-muted">
@@ -219,7 +221,7 @@ export function WaterCard({ w }: { w: Irrigation | null }) {
           </div>
         </>
       ) : (
-        <p className="text-sm text-muted">{w?.reason ?? "Loading the weather…"}</p>
+        <p className="text-sm text-muted">{w === undefined ? "Loading the weather…" : (w?.reason ?? "No estimate for this photo: the plot needs a location for local weather.")}</p>
       )}
     </Card>
   );
@@ -298,6 +300,21 @@ export function AssistantCard({ s, title = "ElderLeaf assistant", consult, compa
       )}
     </Card>
   );
+}
+
+/** What the assistant card shows: the report agent's headline and first step, or the older summary. */
+export function assistantText(r: AnalysisResult | null | undefined): Summary | null {
+  if (!r) return null;
+  if (r.summary) return r.summary;
+  if (!r.report) return null;
+  return {
+    text: r.report.headline,
+    next_step: r.report.next_steps[0] ?? null,
+    source: r.report.written_by,
+    attempts: r.report.validator?.attempts ?? 0,
+    validator_issues: [],
+    error: null,
+  };
 }
 
 export function weedFlag(r: AnalysisResult | null | undefined): string | null {

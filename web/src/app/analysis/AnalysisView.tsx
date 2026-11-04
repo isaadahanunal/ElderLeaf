@@ -4,7 +4,8 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AnalysisOut, AnalysisResult, api, fmt, fmtDate, isNativeApp, MaskOut, PlotDetail } from "@/lib/api";
 import { LayerToggles, MaskOverlay } from "@/components/MaskOverlay";
-import { AssistantCard, CoverCard, HealthCard, PlantsCard, SizeCard, SpotsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
+import { AssistantCard, assistantText, CoverCard, HealthCard, PlantsCard, SizeCard, SpotsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
+import { ReportCard } from "@/components/ReportCard";
 import { RowVideo } from "@/components/RowVideo";
 import { ShareResult } from "@/components/ShareResult";
 import { AgentSteps } from "@/components/Trace";
@@ -219,7 +220,7 @@ function PhotoResult({ a, r, plot, tech, json }: { a: AnalysisOut; r: AnalysisRe
             <ShareResult a={a} r={r} plot={plot} />
           </div>
         </div>
-        {r.summary ? <AssistantCard s={r.summary} consult={r.health.consult_agronomist} /> : <div />}
+        {assistantText(r) ? <AssistantCard s={assistantText(r)!} consult={r.health.consult_agronomist} /> : <div />}
       </div>
 
       <SegmenterNotice name={r.segmenter} />
@@ -290,9 +291,9 @@ function PhotoResult({ a, r, plot, tech, json }: { a: AnalysisOut; r: AnalysisRe
               </InfoTip>
             </div>
             <p className="text-[15px] font-semibold">{r.comparison.summary}</p>
-            {r.notes_since_previous.length > 0 && (
+            {(r.notes_since_previous ?? []).length > 0 && (
               <div className="mt-3 space-y-1.5">
-                {r.notes_since_previous.map((n, i) => (
+                {(r.notes_since_previous ?? []).map((n, i) => (
                   <div key={i} className="rounded-xl bg-well px-3 py-2 text-[13px] text-ink-2">
                     <span className="font-semibold">{fmtDate(n.date)}</span> · {n.text}
                   </div>
@@ -303,6 +304,7 @@ function PhotoResult({ a, r, plot, tech, json }: { a: AnalysisOut; r: AnalysisRe
         )}
       </div>
 
+      {r.report && <ReportCard report={r.report} analysisId={a.id} />}
       <AgentSteps steps={a.trace} scene={r.run_stats?.scene ?? null} meta={tech} actions={json} />
     </div>
   );

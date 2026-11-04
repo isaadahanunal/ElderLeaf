@@ -119,12 +119,12 @@ def test_full_flow(client):
     assert any(s["input"] == "plant" and "confident, using it" in s["result"] for s in first["trace"])
     assert not any(s["status"] == "failed" for s in first["trace"])
     tools = [s["tool"] for s in first["trace"]]
-    assert "lookup_crop_info" in tools and "get_weather" in tools and "write_summary" in tools
-    # day 28 lettuce, ~3% cover: below the crop-library band -> attention
-    assert result["crop_info"]["stage"] == "development"
-    assert any(c["badge"] == "Behind typical" for c in result["context"])
-    assert result["irrigation"]["available"] is False  # no location on this plot
-    assert result["summary"]["source"] == "template" and result["summary"]["text"]
+    # the report agent looks up the crop and judges health (weather is off in tests)
+    assert "lookup_crop_info" in tools and "assess_health" in tools
+    report = result["report"]
+    assert report["headline"] and report["markdown"].startswith("# ")
+    assert report["written_by"] == "template"  # REPORT_AGENT=0 in tests
+    assert result["irrigation"] is None  # no weather lookups in tests
     assert result["segmenter"] == "SAM 3.1"
     stats = result["run_stats"]
     assert stats["strategy"] == "fixed" and stats["llm"] is None
@@ -235,9 +235,8 @@ def test_agent_tries_ranked_words_then_stops(agent_client):
     assert stats["chosen"]["weed"] == {"prompt": "grass weed", "rank": 1}
     assert stats["sam_calls"] == 5  # 3 crop + 1 weed + A4
     assert stats["llm"]["input_tokens"] == 1500 and stats["llm"]["cost_usd"] == 0.003
-    assert stats["summary_llm"]["cost_usd"] == 0.001
-    assert stats["total_cost_usd"] == round(5 * 0.0025 + 0.003 + 0.001, 6)
-    assert analysis["result"]["summary"]["source"] == "agent"
+    assert stats["total_cost_usd"] == round(5 * 0.0025 + 0.003, 6)  # the report agent is off in tests
+    assert analysis["result"]["report"]["headline"]
     assert analysis["result"]["metrics"]["plant_count"]["value"] == 5
     assert analysis["trace"][1]["tool"] == "propose_prompts" and analysis["trace"][1]["status"] == "done"
 
@@ -252,31 +251,6 @@ def test_agent_failure_falls_back_to_fixed_words(agent_client):
     assert stats["chosen"]["crop"]["prompt"] == "plant"
     assert any(s["tool"] == "propose_prompts" and s["status"] == "failed" for s in analysis["trace"])
 
-
-def test_validator_rejects_invented_numbers_then_accepts(agent_client, monkeypatch):
-    from elderleaf import irrigation
-
-    monkeypatch.setattr(
-        irrigation, "get_weather", lambda lat, lon, day=None: {"date": "2026-11-01", "et0_mm": 2.0, "rain_mm": 0.0, "tmax_c": 15.0, "source": "fake"}
-    )
-    bad = '{"summary": "Your lettuce covers 42% of the bed. Spray 20 ml/L of fungicide.", "next_step": "Weed."}'
-    pipeline.set_llm(FakeLLM(summaries=(bad, SUMMARY_REPLY)))
-    plot = agent_client.post(
-        "/plots",
-        headers=DEVICE,
-        json={"name": "Bed E", "crop": "lettuce", "planted_on": "2026-10-04", "area_m2": 10, "lat": 39.89, "lon": 32.78},
-    ).json()
-    analysis = agent_client.get(f"/analyses/{upload(agent_client, plot['id'], make_photo(30), '2026-11-01').json()['id']}").json()
-    result = analysis["result"]
-    summary = result["summary"]
-    assert summary["source"] == "agent" and summary["attempts"] == 2
-    joined = " ".join(summary["validator_issues"])
-    assert "number 42" in joined and "fungicide" in joined and "dose" in joined
-    assert any(s["tool"] == "validate" for s in analysis["trace"])
-    water = result["irrigation"]
-    assert water["available"] and water["et0_mm"] == 2.0
-    assert water["plot_total_liters"] == round(water["liters_per_m2"] * 10)
-    assert 0.15 <= water["kc_adj"] < water["kc"]  # sparse cover uses less water than a full canopy
 
 
 def test_validator_unit():

@@ -28,6 +28,13 @@ export function openNewPlotSheet() {
 // choose to explore without an account, it opens straight to your plots.
 const WELCOMED = "elderleaf-welcomed";
 
+/** After signing out, the app greets you with the sign-in screen again. */
+export function forgetWelcome() {
+  try {
+    localStorage.removeItem(WELCOMED);
+  } catch {}
+}
+
 export function markWelcomed() {
   try {
     localStorage.setItem(WELCOMED, "1");

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AnalysisOut, AnalysisSummary, api, CompareOut, fmt, fmtDate, Irrigation, Note, PlotDetail, today } from "@/lib/api";
 import { MaskOverlay } from "@/components/MaskOverlay";
-import { AssistantCard, CoverCard, PlantsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
+import { AssistantCard, assistantText, CoverCard, PlantsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
 import { Sheet } from "@/components/Sheet";
 import { TrendCharts } from "@/components/TrendCharts";
 import { IconCamera, IconChevronRight, IconDownload, IconDroplet, IconNote, IconVideo } from "@/components/icons";
@@ -148,7 +148,7 @@ function Overview({ plot }: { plot: PlotDetail }) {
   const photos = plot.analyses.filter((a) => a.mode === "photo" && a.status === "done");
   const latestPhoto = photos.at(-1);
   const [latest, setLatest] = useState<AnalysisOut | null>(null);
-  const [water, setWater] = useState<Irrigation | null>(null);
+  const [water, setWater] = useState<Irrigation | null | undefined>(undefined);
 
   useEffect(() => {
     if (latestPhoto) api.analysis(latestPhoto.id).then(setLatest, () => setLatest(null));
@@ -192,7 +192,7 @@ function Overview({ plot }: { plot: PlotDetail }) {
               Open analysis <IconChevronRight size={14} />
             </Link>
           </div>
-          {r?.summary ? <AssistantCard s={r.summary} consult={r.health.consult_agronomist} /> : <Skeleton className="h-64" />}
+          {!r ? <Skeleton className="h-64" /> : assistantText(r) ? <AssistantCard s={assistantText(r)!} consult={r.health.consult_agronomist} /> : <div />}
         </div>
       )}
 
@@ -432,8 +432,8 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
     else setBId(id);
   }
 
-  const older = cmp ? full[cmp.a.id] : undefined;
-  const newer = cmp ? full[cmp.b.id] : undefined;
+  const older = cmp ? full[cmp.before.analysis_id] : undefined;
+  const newer = cmp ? full[cmp.after.analysis_id] : undefined;
   const visible = useMemo(() => new Set(["crop", "weed", "lesion"]), []);
 
   return (
@@ -462,8 +462,8 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
                   </svg>
                 </span>
               </div>
-              <span className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.a.captured_at)}</span>
-              <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.b.captured_at)}</span>
+              <span className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.before.captured_at)}</span>
+              <span className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-bold">{fmtDate(cmp.after.captured_at)}</span>
               <input
                 type="range"
                 min={0}
@@ -484,11 +484,11 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
               <div className="mb-1 text-[15px] font-bold">What changed</div>
               <div className="divide-y divide-line">
                 {cmp.rows
-                  .filter((r) => r.a !== null || r.b !== null)
+                  .filter((r) => r.before !== null || r.after !== null)
                   .map((r) => {
                     const m = COMPARE_META[r.metric] ?? "plants";
                     const u = r.unit === "cm2" ? " cm²" : r.unit === "%" ? "%" : r.unit === "px" ? " px" : "";
-                    const max = Math.max(r.a ?? 0, r.b ?? 0, 1e-9);
+                    const max = Math.max(r.before ?? 0, r.after ?? 0, 1e-9);
                     return (
                       <div key={r.metric} className="py-3">
                         <div className="flex items-center justify-between gap-2">
@@ -498,17 +498,17 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
                           </span>
                           <span className="flex items-center gap-2">
                             <span className="tabular text-sm font-bold">
-                              {r.b === null ? "–" : `${fmt(r.b)}${u}`}
+                              {r.after === null ? "–" : `${fmt(r.after)}${u}`}
                             </span>
-                            <Delta value={r.delta} unit={u === "%" ? " pts" : ""} invert={r.metric === "weed_share_pct" || r.metric === "lesion_share_pct"} />
+                            <Delta value={r.change} unit={u === "%" ? " pts" : ""} invert={r.metric === "weed_share_pct" || r.metric === "lesion_share_pct"} />
                           </span>
                         </div>
                         <div className="mt-2 space-y-1">
                           <div className="h-1.5 rounded-full bg-[#efebe3]">
-                            <div className="h-1.5 rounded-full bg-[#c9ccd3]" style={{ width: `${((r.a ?? 0) / max) * 100}%` }} />
+                            <div className="h-1.5 rounded-full bg-[#c9ccd3]" style={{ width: `${((r.before ?? 0) / max) * 100}%` }} />
                           </div>
                           <div className="h-1.5 rounded-full bg-[#efebe3]">
-                            <div className="h-1.5 rounded-full" style={{ width: `${((r.b ?? 0) / max) * 100}%`, background: METRIC[m].hex }} />
+                            <div className="h-1.5 rounded-full" style={{ width: `${((r.after ?? 0) / max) * 100}%`, background: METRIC[m].hex }} />
                           </div>
                         </div>
                       </div>
@@ -517,10 +517,10 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
               </div>
               <div className="mt-2 flex gap-4 text-xs text-muted">
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-4 rounded-full bg-[#c9ccd3]" /> {fmtDate(cmp.a.captured_at)}
+                  <span className="h-1.5 w-4 rounded-full bg-[#c9ccd3]" /> {fmtDate(cmp.before.captured_at)}
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-4 rounded-full bg-ink" /> {fmtDate(cmp.b.captured_at)}
+                  <span className="h-1.5 w-4 rounded-full bg-ink" /> {fmtDate(cmp.after.captured_at)}
                 </span>
               </div>
             </Card>
@@ -529,12 +529,12 @@ function Compare({ plot, photos }: { plot: PlotDetail; photos: AnalysisSummary[]
       </div>
       {cmp && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <AssistantCard s={cmp.summary} title="Change summary" compact />
-          {cmp.notes_between.length > 0 && (
+          <AssistantCard s={{ text: cmp.summary, next_step: cmp.next_step, source: cmp.written_by, attempts: cmp.validator.attempts, validator_issues: [], error: null }} title="Change summary" compact />
+          {cmp.notes.length > 0 && (
             <Card>
               <div className="mb-3 text-[15px] font-bold">Your notes in between</div>
               <div className="space-y-2">
-                {cmp.notes_between.map((n) => (
+                {cmp.notes.map((n) => (
                   <NoteCard key={n.id} n={n} />
                 ))}
               </div>
