@@ -152,7 +152,13 @@ def validate(reply: object, allowed: list[float], line_ids: set[str], sign_types
     unknown_signs = set(reply.get("signs") or {}) - sign_types
     if unknown_signs:
         errors.append(f"Signs {sorted(unknown_signs)} were not measured; describe only {sorted(sign_types) or 'none'}.")
-    for text in _texts(reply):
+    return errors + text_errors(_texts(reply), allowed)
+
+
+def text_errors(texts: list[str], allowed: list[float]) -> list[str]:
+    """The plan's checks on any agent text: numbers from the facts only, no chemicals, doses or diagnoses."""
+    errors = []
+    for text in texts:
         bad = [n for n in _NUMBER.findall(text) if not _number_ok(n, allowed)]
         if bad:
             errors.append(f'Numbers {bad} in "{text[:120]}" are not in the facts. Use only numbers from the facts.')
@@ -204,6 +210,7 @@ class ReportInputs:
     context: list[ContextItem]  # statuses set in code, with template texts
     px_per_cm2: float | None
     scene: str | None = None  # the prompt agent's one-line description of the photo
+    color: dict | None = None  # health.measure_color result, when the pipeline already ran it
 
 
 @dataclass
@@ -257,7 +264,7 @@ class _Run:
     def assess_health(self) -> None:
         inp = self.inp
         step = self.tracer.start("assess_health", "Checking plant color and spots", input=f"{len(inp.crop)} crop masks")
-        color = measure_color(inp.rgb, inp.crop, inp.crop_ids)
+        color = inp.color if inp.color is not None else measure_color(inp.rgb, inp.crop, inp.crop_ids)
         self.assessed = color["assessed"]
         if self.assessed:
             for sign in ("yellowing", "browning"):
@@ -387,7 +394,9 @@ class _Run:
 
     def facts(self, info: CropInfo | None, water: dict, lines: list[tuple[str, ContextItem]]) -> dict:
         inp, m = self.inp, self.inp.metrics
-        measurements = {key: {"value": mv.value, "unit": mv.unit} for key, mv in m if mv is not None}
+        measurements: dict = {key: {"value": mv.value, "unit": mv.unit} for key, mv in m if key != "by_crop" and mv is not None}
+        if m.by_crop:  # mixed bed
+            measurements["per_crop"] = {b.label: {"plants": b.plant_count, "crop_cover_pct": b.canopy_cover_pct} for b in m.by_crop.values()}
         quality = {"level": inp.quality["level"], "sharp": inp.quality["sharp"], "exposure": inp.quality["exposure"]}
         comparison = None
         if inp.comparison is not None:
@@ -551,6 +560,8 @@ def render_markdown(result: AnalysisResult, plot_name: str, crop_label: str) -> 
         mv = getattr(r.metrics, key)
         if mv is not None:
             md.append(f"| {label} | {_fmt(mv.value)} {mv.unit} | {mv.how} |")
+    if r.metrics.by_crop:
+        md += ["", "Per crop: " + "; ".join(f"{b.label} {b.plant_count} plants, {_fmt(b.canopy_cover_pct)}% cover" for b in r.metrics.by_crop.values()) + "."]
     md += ["", "## Is this normal?", ""] + [f"- {_STATUS[c.status]} {c.text}" for c in r.context]
     h = r.health
     md += ["", "## Plant health: possible signs, not a diagnosis", ""]

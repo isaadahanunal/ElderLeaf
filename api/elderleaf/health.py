@@ -46,8 +46,9 @@ def likelihood(sign: str, share_pct: float) -> str | None:
     return None
 
 
-def measure_color(rgb: np.ndarray, crop: list[Instance], crop_ids: list[str]) -> dict:
-    """{"assessed", "crop_px", "yellowing": {"share_pct", "plant_ids"}, "browning": {...}}."""
+def measure_color(rgb: np.ndarray, crop: list[Instance], crop_ids: list[str], with_mask: bool = False) -> dict:
+    """{"assessed", "crop_px", "yellowing": {"share_pct", "plant_ids"}, "browning": {...}}; with_mask adds
+    "discolored_mask", a full-size bool mask of the yellow or brown crop pixels (for the leaf-spot ratio)."""
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
     plants = []
     for inst, mask_id in zip(crop, crop_ids):
@@ -55,14 +56,15 @@ def measure_color(rgb: np.ndarray, crop: list[Instance], crop_ids: list[str]) ->
         inner = cv2.erode(inst.mask.astype(np.uint8), _KERNEL) > 0
         if inner.sum() < 20:  # tiny seedling: erosion would remove it
             inner = inst.mask
-        plants.append((mask_id, hsv[y0:y1, x0:x1][inner].astype(np.int16)))
-    total = sum(len(px) for _, px in plants)
+        plants.append((mask_id, inst.box, inner, hsv[y0:y1, x0:x1][inner].astype(np.int16)))
+    total = sum(len(px) for *_, px in plants)
     if total < MIN_PIXELS:
         return {"assessed": False, "crop_px": int(total)}
-    reference = float(np.median(np.concatenate([px[:, 0] for _, px in plants])))
+    reference = float(np.median(np.concatenate([px[:, 0] for *_, px in plants])))
     counts = {"yellowing": 0, "browning": 0}
     evidence: dict[str, list[tuple[float, str]]] = {"yellowing": [], "browning": []}
-    for mask_id, px in plants:
+    discolored = np.zeros(rgb.shape[:2], bool) if with_mask else None
+    for mask_id, (x0, y0, x1, y1), inner, px in plants:
         hue, sat, val = px[:, 0], px[:, 1], px[:, 2]
         brown = (hue <= 17) & (sat >= 60) & (val >= 30) & (val <= 190)
         yellow = (hue <= reference - YELLOW_HUE_DROP) & ~brown & (sat >= 60) & (val >= 60)
@@ -71,7 +73,13 @@ def measure_color(rgb: np.ndarray, crop: list[Instance], crop_ids: list[str]) ->
             counts[sign] += n
             if len(px) and n / len(px) >= PLANT_SHARE:
                 evidence[sign].append((n / len(px), mask_id))
+        if discolored is not None:
+            local = np.zeros(inner.shape, bool)
+            local[inner] = yellow | brown
+            discolored[y0:y1, x0:x1] |= local
     out: dict = {"assessed": True, "crop_px": int(total), "reference_hue": round(reference, 1)}
+    if discolored is not None:
+        out["discolored_mask"] = discolored
     for sign in ("yellowing", "browning"):
         out[sign] = {
             "share_pct": round(100.0 * counts[sign] / total, 1),

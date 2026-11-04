@@ -42,6 +42,15 @@ def instance_iou(a: Instance, b: Instance) -> float:
     return float(inter / union) if union else 0.0
 
 
+def merge_duplicates(instances: list[Instance], iou_threshold: float = 0.5) -> list[Instance]:
+    """Two search phrases often find the same plant: keep the higher-scoring mask."""
+    kept: list[Instance] = []
+    for inst in sorted(instances, key=lambda i: i.score_or_one, reverse=True):
+        if all(instance_iou(inst, other) < iou_threshold for other in kept):
+            kept.append(inst)
+    return kept
+
+
 def resolve_cross_class(
     by_class: dict[str, list[Instance]], iou_threshold: float = 0.5, priority: list[str] | None = None
 ) -> dict[str, list[Instance]]:
