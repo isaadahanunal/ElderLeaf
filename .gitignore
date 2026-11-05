@@ -246,3 +246,4 @@ web/out/
 *.aab
 *.keystore
 *.jks
+!release/ElderLeaf.apk
