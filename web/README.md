@@ -20,6 +20,6 @@ scripts/build-apk.sh https://<your-api>.modal.run   # needs JDK 21 + Android SDK
 ```
 
 - The API address comes from the argument (or `NEXT_PUBLIC_API_URL`) and can be changed in the app: Settings → App.
-- Camera: "Take photo" / "Record video" open the phone camera; "Camera with guide" shows the last photo faintly on top.
+- Camera: "Take photo" opens the phone camera; "Camera with guide" shows the last photo faintly on top.
 - Icons and splash come from `public/icon-maskable-512.png` and `public/brand/elderleaf-logo-1024.png`.
 

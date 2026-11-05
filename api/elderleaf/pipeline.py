@@ -27,12 +27,8 @@ from . import report_agent
 from .agent import Proposal, Scan, propose_prompts, scan_plants
 from .config import settings
 from .crops import FALLBACK_PROMPT, crop_info, crop_label, crop_prompt
-from .db import Analysis, Note, SessionLocal
+from .db import Analysis, Note, SessionLocal, User
 from .irrigation import water_need
-from .llm import LLMClient, LLMResult
-from .masks import clean_instances, instance_iou, resolve_cross_class
-from .crops import FALLBACK_PROMPT, crop_label, crop_prompt
-from .db import Analysis, Note, SessionLocal
 from .llm import LLMClient, LLMResult
 from .masks import clean_instances, instance_iou, merge_duplicates, resolve_cross_class
 from .health import coverage_on_crop, measure_color
@@ -58,7 +54,6 @@ from .schemas import (
     TraceStep,
 )
 from .storage import get_storage
-from .summary import write_summary
 
 log = logging.getLogger("elderleaf.pipeline")
 
@@ -179,10 +174,12 @@ def _mean_score(instances: list[Instance]) -> float:
     return float(np.mean([i.score_or_one for i in instances])) if instances else 0.0
 
 
-def _describe(instances: list[Instance]) -> str:
+def _describe(key: str, instances: list[Instance]) -> str:
+    if key == "scale":
+        return "No A4 sheet in the photo, so sizes are in pixels." if not instances else "Found a sheet of paper; checking it is a flat A4."
     if not instances:
-        return "no masks"
-    return f"{len(instances)} masks, mean confidence {_mean_score(instances):.2f}"
+        return "No leaf spots found."
+    return f"Found {len(instances)} possible spots ({round(100 * _mean_score(instances))}% sure); keeping the ones on your plants."
 
 
 # ------------------------------------------------------------------ entry point
@@ -193,10 +190,6 @@ def run_analysis(analysis_id: str) -> None:
         analysis = db.get(Analysis, analysis_id)
         if analysis is None:
             return
-        if analysis.mode == "video":
-            from .video import run_video_analysis
-
-            return run_video_analysis(analysis_id)
         analysis.status, analysis.error = "running", None
         db.commit()
         tracer = Tracer(db, analysis)
@@ -218,15 +211,15 @@ def _choose_words(tracer: Tracer, image_bytes: bytes, label: str, days_after_pla
     llm = get_llm()
     step = tracer.start("propose_prompts", "Looking at the photo to choose search words", input=label)
     if not llm.configured:
-        tracer.done(step, "no LLM key configured; using the fixed words", status="skipped")
+        tracer.done(step, "The assistant is off; using the standard words.", status="skipped")
         return None
     proposal = propose_prompts(llm, image_bytes, label, days_after_planting)
     if proposal.error:
-        tracer.done(step, f"agent unavailable ({proposal.error}); using the fixed words", status="failed")
+        tracer.done(step, "The assistant did not answer; using the standard words.", status="failed")
     else:
         crop_words = " / ".join(proposal.crop_prompts) or "-"
         weed_words = " / ".join(proposal.weed_prompts) or "-"
-        tracer.done(step, f"crop: {crop_words}; weeds: {weed_words}")
+        tracer.done(step, f"Plants: {crop_words.replace(' / ', ', ')}. Weeds: {weed_words.replace(' / ', ', ')}.")
     return proposal
 
 
@@ -258,14 +251,16 @@ class Search:
 def _on_done(tracer: Tracer, thr: float, single_tries: bool = False):
     def on_done(step: int, chain: Chain, attempt: Attempt) -> None:
         if attempt.error:
-            tracer.done(step, f"failed: {attempt.error}", status="failed")
+            tracer.done(step, "The search did not answer; moving on.", status="failed")
             return
-        confidence = f", mean confidence {attempt.mean_confidence:.2f}" if attempt.mean_confidence is not None else ""
+        found = "Nothing found" if not attempt.kept else f"Found {attempt.kept}"
+        if attempt.kept and attempt.mean_confidence is not None:
+            found += f" ({round(100 * attempt.mean_confidence)}% sure)"
         if single_tries:  # scan mode: every phrase is searched; weak ones may get a fallback word later
-            verdict = "confident" if attempt.ok else "weak"
+            verdict = "confident" if attempt.ok else "not sure"
         else:
-            verdict = "confident, using it" if attempt.ok else ("weak, no words left" if chain.finished else "weak, trying the next word")
-        tracer.done(step, f"{attempt.masks} masks, {attempt.kept} above {thr:g}{confidence}: {verdict}")
+            verdict = "confident, using it" if attempt.ok else ("not sure, no words left" if chain.finished else "not sure, trying the next word")
+        tracer.done(step, f"{found}: {verdict}.")
 
     return on_done
 
@@ -317,7 +312,7 @@ def _single_search(tracer: Tracer, sam: SamClient, image_bytes: bytes, crop: str
 # ------------------------------------------------------------------ mixed bed: scan mode
 
 
-def _mixed_plan(tracer: Tracer, image_bytes: bytes, crops: list[str]) -> Scan | None:
+def _mixed_plan(tracer: Tracer, image_bytes: bytes, crops: list[str], days_after_planting: int | None = None) -> Scan | None:
     """Scan mode: the agent lists one phrase per kind of plant it sees (as many as the photo needs)."""
     if current_strategy() != "agent":
         return None
@@ -325,13 +320,16 @@ def _mixed_plan(tracer: Tracer, image_bytes: bytes, crops: list[str]) -> Scan | 
     labels = [crop_label(c) for c in crops]
     step = tracer.start("scan_plants", "Listing every kind of plant in the photo", input=", ".join(labels))
     if not llm.configured:
-        tracer.done(step, "no LLM key configured; using the crop names", status="skipped")
+        tracer.done(step, "The assistant is off; looking for each crop by name.", status="skipped")
         return None
-    scan = scan_plants(llm, image_bytes, labels)
+    scan = scan_plants(llm, image_bytes, labels, days_after_planting=days_after_planting)
     if scan.error:
-        tracer.done(step, f"agent unavailable ({scan.error}); using the crop names", status="failed")
+        tracer.done(step, "The assistant did not answer; looking for each crop by name.", status="failed")
     else:
-        tracer.done(step, "; ".join(f"{it['phrase']} ({it['crop'] or 'weed'})" for it in scan.items))
+        groups: dict[str, list[str]] = defaultdict(list)
+        for it in scan.items:
+            groups[(it["crop"] or "weeds").capitalize()].append(it["phrase"])
+        tracer.done(step, " ".join(f"{name}: {', '.join(phrases)}." for name, phrases in groups.items()))
     return scan
 
 
@@ -436,10 +434,14 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     # 1. photo quality
     step = tracer.start("check_image_quality", "Checking photo quality")
     quality = image_quality(rgb)
-    tracer.done(step, f"sharpness {quality['blur']}, brightness {quality['brightness']} -> {quality['level']}")
+    if quality["level"] == "good":
+        tracer.done(step, "Sharp and well lit.")
+    else:
+        problem = "blurry" if not quality["sharp"] else quality["exposure"].replace("_", " ")
+        tracer.done(step, f"The photo looks {problem}, so the numbers may be off.")
 
     # 2. what should SAM look for? One crop: the agent's 3 ranked phrases. Mixed bed: one phrase per kind of plant.
-    plan = _mixed_plan(tracer, image_bytes, crops) if mixed else _single_plan(tracer, image_bytes, plot.crop, days_after_planting)
+    plan = _mixed_plan(tracer, image_bytes, crops, days_after_planting) if mixed else _single_plan(tracer, image_bytes, plot.crop, days_after_planting)
 
     # 3. SAM 3.1 runs the search; A4 (and leaf spots) alongside
     sam = get_sam()
@@ -457,10 +459,10 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         for key, future in side_futures.items():
             try:
                 segs[key] = future.result()
-                tracer.done(side_steps[key], _describe(segs[key].instances))
+                tracer.done(side_steps[key], _describe(key, segs[key].instances))
             except Exception as exc:  # scale and spots are optional
                 segs[key] = None
-                tracer.done(side_steps[key], f"skipped: {exc}", status="failed")
+                tracer.done(side_steps[key], "The search did not answer; skipped.", status="failed")
 
     # 4. cleanup + metrics
     step = tracer.start("compute_metrics", "Cleaning masks and computing metrics")
@@ -517,7 +519,7 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     m = compute_metrics(crop, weed, lesion, h, w, px_per_cm2, discolored=color.pop("discolored_mask", None))
     tracer.done(
         step,
-        f"{m['plant_count']} plants, canopy {m['canopy_cover_pct']}%, weed share {m['weed_share_pct']}%",
+        f"{m['plant_count']} plants. Crop cover {m['canopy_cover_pct']:g}% of the photo, weeds {m['weed_share_pct']:g}% of the green.",
     )
 
     by_crop = None
@@ -576,10 +578,19 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     previous = _previous(db, analysis)
     comparison = _compare(previous, analysis, metrics) if previous else None
     notes = _notes_since(db, analysis, previous)
-    tracer.done(step, (comparison.summary if comparison else "first photo of this plot") + (f" {len(notes)} notes since then." if notes else ""))
+    tracer.done(step, (comparison.summary if comparison else "First photo of this plot.") + (f" {len(notes)} of your notes since then." if notes else ""))
 
-    # 6. "Is this normal?" statuses, set in code (their texts are drafts for the report agent)
-    context = _context(metrics, comparison, previous, quality)
+    # 6. crop library: where should this crop be today? ("Is this normal?")
+    step = tracer.start("lookup_crop_info", "Looking up what is typical for this crop and age", input=f"{crop_label(plot.crop)}, day {days_after_planting}")
+    info = crop_info(plot.crop, days_after_planting)
+    if info is None:
+        tracer.done(step, "Add the crop and the planting date to compare with what is typical.", status="skipped")
+    else:
+        lo, hi = info["cover_typical_pct"]
+        tracer.done(step, f"Day {info['day']}: {info['stage']} stage (days {info['stage_start_day']}-{info['stage_end_day']}). A typical plot covers {lo}-{hi}% now.")
+
+    # 7. "Is this normal?" statuses, set in code (their texts are drafts for the report agent)
+    context = _context(metrics, comparison, previous, quality, info)
     if search.crop_visible is False:
         context.insert(
             0,
@@ -602,9 +613,21 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
                         text=f"No {crop_label(c).lower()} plants were found in this photo. Is that crop in the frame?",
                     ),
                 )
+
+    # 8. water need: FAO-56 Kc (crop library, scaled by the measured cover) x ET0 of the plot location (Open-Meteo)
+    step = tracer.start("get_weather", "Getting the weather for the water need (FAO-56)", input=None if plot.lat is None else f"{plot.lat:.2f}, {plot.lon:.2f}")
+    irrigation = water_need(plot.crop, days_after_planting, metrics.canopy_cover_pct.value, plot.area_m2, plot.lat, plot.lon, day=_weather_day(analysis))
+    if irrigation["available"]:
+        total = f" ({irrigation['plot_total_liters']} L for the plot)" if irrigation.get("plot_total_liters") is not None else ""
+        tracer.done(step, f"About {irrigation['liters_per_m2']} L of water per m² today{total}.")
+    else:
+        tracer.done(step, irrigation["reason"], status="skipped")
     detection_confidence = round(_mean_score(crop), 2) if crop else None
 
-    # 7. report agent: crop facts, health, weather + water need, then one validated report
+    # 9. report agent: health, a closer look if needed, then one validated report in the grower's terms.
+    # Like the prompt agent, the writer uses the LLM only with PROMPT_STRATEGY=agent (and ENABLE_SUMMARY=1).
+    grower = db.get(User, plot.device_id) if plot.device_id and plot.device_id.startswith("u_") else None
+    writer = get_llm() if current_strategy() == "agent" and settings.enable_summary else None
     outcome = report_agent.run(
         report_agent.ReportInputs(
             plot_name=plot.name,
@@ -613,8 +636,6 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
             captured_at=analysis.captured_at,
             days_after_planting=days_after_planting,
             area_m2=plot.area_m2,
-            lat=plot.lat,
-            lon=plot.lon,
             row_spacing_cm=plot.row_spacing_cm,
             plant_spacing_cm=plot.plant_spacing_cm,
             image_bytes=image_bytes,
@@ -627,26 +648,29 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
             crop_ids=crop_ids,
             lesion_share=spots_share,
             lesion_ids=lesion_ids,
-            color=color,
             comparison=comparison,
             notes=notes,
             context=context,
             px_per_cm2=px_per_cm2,
+            crop_info=info,
+            irrigation=irrigation,
+            experience=grower.experience if grower else None,
             scene=search.scene,
+            color=color,
         ),
         tracer,
         sam,
-        get_llm() if report_agent.enabled() else None,
+        writer,
         add,
     )
 
-    # 8. what it all cost (SAM calls + LLM tokens) and how long it took
+    # 10. what it all cost (SAM calls + LLM tokens) and how long it took
     attempts = search.attempts
     n_sam = len(attempts) + len(side_jobs) + (1 if outcome.report.looked_closer else 0)
     llm_usage = search.llm
     llm_cost = llm_usage.cost_usd if llm_usage else 0.0
-    report_usage = outcome.llm
-    report_cost = report_usage.cost_usd if report_usage else 0.0
+    writer_usage = outcome.llm
+    writer_cost = writer_usage.cost_usd if writer_usage else 0.0
     run_stats = RunStats(
         strategy=search.strategy,
         scene=search.scene,
@@ -658,10 +682,10 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         sam_calls=n_sam,
         sam_cost_usd=sam_cost(n_sam),
         llm=LLMUsage(**{k: getattr(llm_usage, k) for k in LLMUsage.model_fields}) if llm_usage else None,
-        total_cost_usd=None if llm_cost is None or report_cost is None else round(sam_cost(n_sam) + llm_cost + report_cost, 6),
+        total_cost_usd=None if llm_cost is None or writer_cost is None else round(sam_cost(n_sam) + llm_cost + writer_cost, 6),
         sam_latency_s=sam_latency(attempts),
         wall_time_s=round(time.monotonic() - started, 2),
-        report_llm=LLMUsage(**{k: getattr(report_usage, k) for k in LLMUsage.model_fields}) if report_usage else None,
+        summary_llm=LLMUsage(**{k: getattr(writer_usage, k) for k in LLMUsage.model_fields}) if writer_usage else None,
     )
 
     result = AnalysisResult(
@@ -678,7 +702,10 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
         health=outcome.health,
         context=outcome.context,
         comparison=outcome.comparison,
-        irrigation=outcome.irrigation,
+        crop_info=info,
+        irrigation=irrigation,
+        summary=Summary(**outcome.summary),
+        notes_since_previous=notes,
         report=outcome.report,
         run_stats=run_stats,
         agent_trace=[TraceStep(**s) for s in tracer.steps],
@@ -758,57 +785,6 @@ def _weather_day(analysis: Analysis):
     today = dt.date.today()
     day = analysis.captured_at
     return day if day <= today and (today - day).days <= 90 else today
-
-
-def _notes_between(db: Session, plot_id: str, start, end) -> list[dict]:
-    """Notes after the previous photo (exclusive) up to this one (inclusive)."""
-    stmt = select(Note).where(Note.plot_id == plot_id, Note.noted_on <= end)
-    if start is not None:
-        stmt = stmt.where(Note.noted_on > start)
-    notes = db.scalars(stmt.order_by(Note.noted_on)).all()
-    return [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text} for n in notes]
-
-
-def _facts(plot, day, metrics: Metrics, comparison, context, health: Health, info, irrigation, notes, quality) -> dict:
-    """Everything the summary writer may talk about. The validator only accepts numbers found here."""
-    def value(item: MetricValue | None):
-        return None if item is None else item.value
-
-    return {
-        "crop": crop_label(plot.crop),
-        "days_after_planting": day,
-        "photo_quality": quality["level"],
-        "measurements": {
-            "plant_count": value(metrics.plant_count),
-            "crop_cover_pct": value(metrics.canopy_cover_pct),
-            "weed_share_pct": value(metrics.weed_share_pct),
-            "leaf_spot_share_pct": value(metrics.lesion_share_pct),
-            "mean_plant_area": value(metrics.mean_plant_area),
-            "mean_plant_area_unit": metrics.mean_plant_area.unit,
-        },
-        "change_since_previous_photo": None
-        if comparison is None
-        else {
-            "days_between": comparison.days_between,
-            "deltas": comparison.deltas,
-            "growth_rate": comparison.growth_rate,
-        },
-        "crop_library": None
-        if info is None
-        else {
-            "stage": info["stage"],
-            "stage_days": [info["stage_start_day"], info["stage_end_day"]],
-            "typical_crop_cover_pct": info["cover_typical_pct"],
-        },
-        "water_need": irrigation if irrigation.get("available") else None,
-        "context": [c.model_dump() for c in context],
-        "health": {
-            "signs": [s.description for s in health.signs],
-            "consult_agronomist": health.consult_agronomist,
-            "consult_reasons": health.consult_reasons,
-        },
-        "grower_notes_since_previous_photo": notes,
-    }
 
 
 def _context(

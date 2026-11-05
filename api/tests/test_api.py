@@ -167,6 +167,24 @@ def test_full_flow(client):
     assert not_called.status_code == 404
 
 
+def test_old_row_video_rows_stay_hidden(client):
+    """Row videos were removed; a database that still has such a row must not break the plot pages."""
+    import datetime as dt
+
+    from elderleaf.db import Analysis, SessionLocal
+
+    plot = client.post("/plots", headers=DEVICE, json={"name": "Bed V", "crop": "lettuce"}).json()
+    photo = upload(client, plot["id"], make_photo(20), "2026-11-01").json()["id"]
+    with SessionLocal() as db:
+        db.add(Analysis(id="a_oldvideo", plot_id=plot["id"], mode="video", captured_at=dt.date(2026, 11, 2),
+                        image_key="old.jpg", status="done", trace=[], result={"row_plant_count": 7}))
+        db.commit()
+    detail = client.get(f"/plots/{plot['id']}").json()
+    assert [a["id"] for a in detail["analyses"]] == [photo] and detail["latest"]["id"] == photo
+    assert client.get("/analyses/a_oldvideo").status_code == 404
+    assert len(client.get(f"/plots/{plot['id']}/export.csv").text.strip().splitlines()) == 2
+
+
 def test_rejects_bad_uploads_and_foreign_devices(client):
     plot = client.post("/plots", headers=DEVICE, json={"name": "Bed B", "crop": "other"}).json()
     bad = client.post(f"/plots/{plot['id']}/analyses", headers=DEVICE, files={"file": ("x.png", b"not an image", "image/png")})

@@ -51,6 +51,8 @@ export interface MaskOut {
   area_px: number;
   box: number[];
   polygons: number[][][];
+  /** crop id of a crop mask in a mixed bed (null when plants could not be told apart) */
+  crop?: string | null;
 }
 
 export interface MetricValue {
@@ -132,14 +134,19 @@ export interface AnalysisResult {
     weed_share_pct: MetricValue;
     lesion_share_pct: MetricValue | null;
     mean_plant_area: MetricValue;
+    /** mixed beds: count and cover per crop id */
+    by_crop?: Record<string, { label: string; plant_count: number; canopy_cover_pct: number; mask_ids: string[] }> | null;
   };
   scale: { found: boolean; mask_id: string | null; px_per_cm2: number | null; note: string };
   health: {
     assessed: boolean;
-    signs: { type: string; likelihood: string; evidence_mask_ids: string[]; description: string }[];
+    signs: { type: string; likelihood: string; evidence_mask_ids: string[]; description: string; share_pct?: number | null }[];
     detection_confidence: number | null;
     consult_agronomist: boolean;
     consult_reasons: string[];
+    /** yellowing / browning / leaf_spots as % of crop area (measured in code) */
+    measures?: Record<string, number>;
+    summary?: string | null;
   };
   context: ContextItem[];
   comparison: {
@@ -159,11 +166,13 @@ export interface AnalysisResult {
     source: string;
   } | null;
   irrigation: Irrigation | null;
+  /** the report agent's combined report (also at GET /analyses/{id}/report.md) */
   report?: Report | null;
-  // analyses made before the report agent
+  /** the report agent's short summary and next step (older analyses may only have this) */
   summary?: Summary | null;
   notes_since_previous?: { date: string; kind: string; text: string }[];
   run_stats: {
+    /** agent = ranked words for one crop; scan = mixed bed, one phrase per kind of plant; fixed = no LLM */
     strategy: "agent" | "scan" | "fixed";
     scene: string | null;
     sam_calls: number;
@@ -176,47 +185,25 @@ export interface AnalysisResult {
   agent_trace: TraceStep[];
 }
 
-export interface VideoResult {
-  analysis_id: string;
-  segmenter: string;
-  prompt: string;
-  width: number;
-  height: number;
-  duration_s: number;
-  sampled_fps: number;
-  row_plant_count: number;
-  max_per_frame: number;
-  frames: { t: number; boxes: { track_id: number; box: number[]; score: number | null }[] }[];
-  tracks: { track_id: number; frames: number; first_t: number; last_t: number; mean_score: number | null; counted: boolean }[];
-  how: string;
-  context: ContextItem[];
-  run_stats: { sam_calls?: number; sam_cost_usd?: number; wall_time_s?: number };
-}
-
 export interface AnalysisOut {
   id: string;
   plot_id: string;
-  mode: "photo" | "video";
   captured_at: string;
   status: Status;
   error: string | null;
   image_url: string;
-  video_url: string | null;
   overlay_url: string | null;
   trace: TraceStep[];
   result: AnalysisResult | null;
-  video_result: VideoResult | null;
 }
 
 export interface AnalysisSummary {
   id: string;
-  mode: "photo" | "video";
   captured_at: string;
   status: Status;
   image_url: string;
   summary: string | null;
   plant_count: number | null;
-  row_plant_count: number | null;
   canopy_cover_pct: number | null;
   weed_share_pct: number | null;
   lesion_share_pct: number | null;
@@ -237,6 +224,10 @@ export interface Plot {
   name: string;
   crop: string;
   crop_label: string;
+  /** more than one crop in the same photo: the agent lists every kind of plant (scan mode) */
+  mixed: boolean;
+  other_crops: string[];
+  other_crop_labels: string[];
   planted_on: string | null;
   days_after_planting: number | null;
   area_m2: number | null;
@@ -296,7 +287,7 @@ export interface User {
 }
 
 export interface Me extends User {
-  stats: { plots: number; photos: number; videos: number; notes: number; plants_counted: number; first_measured: string | null };
+  stats: { plots: number; photos: number; notes: number; plants_counted: number; first_measured: string | null };
 }
 
 export interface AuthOut {
@@ -409,11 +400,11 @@ export const api = {
   createPlot: (body: Record<string, unknown>) => call<Plot>("/plots", { method: "POST", body: JSON.stringify(body) }),
   deletePlot: (id: string) => call<void>(`/plots/${id}`, { method: "DELETE" }),
   analysis: (id: string) => call<AnalysisOut>(`/analyses/${id}`),
-  upload: (plotId: string, file: Blob, kind: "photo" | "video", capturedAt?: string, filename?: string) => {
+  upload: (plotId: string, file: Blob, capturedAt?: string, filename?: string) => {
     const form = new FormData();
-    form.append("file", file, filename || (kind === "video" ? "row.mp4" : "plot.jpg"));
+    form.append("file", file, filename || "plot.jpg");
     if (capturedAt) form.append("captured_at", capturedAt);
-    return call<AnalysisOut>(`/plots/${plotId}/${kind === "video" ? "videos" : "analyses"}`, { method: "POST", body: form });
+    return call<AnalysisOut>(`/plots/${plotId}/analyses`, { method: "POST", body: form });
   },
   rerun: (id: string) => call<AnalysisOut>(`/analyses/${id}/rerun`, { method: "POST" }),
   addNote: (plotId: string, body: { kind: string; date: string; text: string }) =>
@@ -422,6 +413,7 @@ export const api = {
   compare: (plotId: string, a: string, b: string) => call<CompareOut>(`/plots/${plotId}/compare?a=${a}&b=${b}`),
   csvUrl: (plotId: string) => `${apiUrl()}/plots/${plotId}/export.csv`,
   analysisJsonUrl: (id: string) => `${apiUrl()}/analyses/${id}`,
+  reportUrl: (id: string) => `${apiUrl()}/analyses/${id}/report.md`,
 };
 
 // ------------------------------------------------------------------ formatting

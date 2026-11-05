@@ -53,19 +53,13 @@ from .schemas import (
     ProfileUpdate,
     SignIn,
     SignUp,
-    Summary,
     TraceStep,
     UserOut,
     UserStats,
-    VideoResult,
 )
-from .summary import write_summary
-from .video import still_jpeg, to_web_mp4
 from .storage import LocalStorage, get_storage
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-MAX_VIDEO_BYTES = 150 * 1024 * 1024
-VIDEO_TYPES = {".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/mp4", ".webm": "video/webm"}
 
 
 @asynccontextmanager
@@ -124,7 +118,8 @@ def _image_url(request: Request, key: str) -> str:
 
 
 def _ordered(analyses: list[Analysis]) -> list[Analysis]:
-    return sorted(analyses, key=lambda a: (a.captured_at, a.created_at))
+    """Photo analyses in date order. Rows left from the removed row-video feature are skipped."""
+    return sorted((a for a in analyses if a.mode == "photo"), key=lambda a: (a.captured_at, a.created_at))
 
 
 def _attention(result: dict | None) -> list[str]:
@@ -138,17 +133,6 @@ def _attention(result: dict | None) -> list[str]:
 
 def _summary(a: Analysis, request: Request) -> AnalysisSummary:
     result = a.result or {}
-    if a.mode == "video":
-        return AnalysisSummary(
-            id=a.id,
-            mode="video",
-            captured_at=a.captured_at,
-            status=a.status,
-            image_url=_image_url(request, a.image_key),
-            summary=(result.get("context") or [{}])[0].get("text"),
-            row_plant_count=result.get("row_plant_count"),
-            attention=_attention(result),
-        )
     metrics = result.get("metrics", {})
 
     def value(key: str):
@@ -172,14 +156,14 @@ def _summary(a: Analysis, request: Request) -> AnalysisSummary:
 
 
 def _plot_fields(plot: Plot, request: Request) -> dict:
-    done = [a for a in _ordered(plot.analyses) if a.status == "done" and a.mode == "photo"]
+    done = [a for a in _ordered(plot.analyses) if a.status == "done"]
     latest = done[-1] if done else None
     comparison = (latest.result or {}).get("comparison") if latest else None
     return {
         "id": plot.id,
         "name": plot.name,
         "crop": plot.crop,
-        "crop_label": crop_label(plot.crop),
+        "crop_label": _plot_label(plot),
         "mixed": bool(plot.mixed),
         "other_crops": plot.other_crops or [],
         "other_crop_labels": [crop_label(c) for c in plot.other_crops or []],
@@ -205,26 +189,22 @@ def _analysis_out(a: Analysis, request: Request) -> AnalysisOut:
         if step.tool == "run_sam" and step.input and step.status == "done":
             step.image_url = f"{base}/analyses/{a.id}/sam.png?prompt={quote(step.input)}"
         steps.append(step)
-    video = a.mode == "video"
     return AnalysisOut(
         id=a.id,
         plot_id=a.plot_id,
-        mode=a.mode,
         captured_at=a.captured_at,
         status=a.status,
         error=a.error,
         image_url=_image_url(request, a.image_key),
-        video_url=_image_url(request, a.video_key) if video and a.video_key else None,
-        overlay_url=f"{base}/analyses/{a.id}/overlay.png" if a.result and not video else None,
+        overlay_url=f"{base}/analyses/{a.id}/overlay.png" if a.result else None,
         trace=steps,
-        result=AnalysisResult.model_validate(a.result) if a.result and not video else None,
-        video_result=VideoResult.model_validate(a.result) if a.result and video else None,
+        result=AnalysisResult.model_validate(a.result) if a.result else None,
     )
 
 
 def _analysis_or_404(db: Session, analysis_id: str) -> Analysis:
     analysis = db.get(Analysis, analysis_id)
-    if analysis is None:
+    if analysis is None or analysis.mode != "photo":  # old row-video rows are hidden
         raise HTTPException(404, "Analysis not found")
     return analysis
 
@@ -317,16 +297,15 @@ def _require_user(user: User | None = Depends(current_user)) -> User:
 @app.get("/me", response_model=MeOut)
 def me(user: User = Depends(_require_user), db: Session = Depends(get_db)) -> MeOut:
     plots = db.scalars(select(Plot).where(Plot.device_id == user.id)).all()
-    done = [a for p in plots for a in p.analyses if a.status == "done" and a.result]
+    done = [a for p in plots for a in _ordered(p.analyses) if a.status == "done" and a.result]
     plants = 0
     for p in plots:
-        photos = [a for a in _ordered(p.analyses) if a.status == "done" and a.mode == "photo" and a.result]
+        photos = [a for a in _ordered(p.analyses) if a.status == "done" and a.result]
         if photos:
             plants += int(photos[-1].result["metrics"]["plant_count"]["value"] or 0)
     stats = UserStats(
         plots=len(plots),
-        photos=sum(a.mode == "photo" for a in done),
-        videos=sum(a.mode == "video" for a in done),
+        photos=len(done),
         notes=sum(len(p.notes) for p in plots),
         plants_counted=plants,
         first_measured=min((a.captured_at for a in done), default=None),
@@ -390,60 +369,6 @@ def get_plot(plot_id: str, request: Request, db: Session = Depends(get_db)):
     )
 
 
-@app.get("/plots/{plot_id}/compare", response_model=CompareOut)
-def compare_two(plot_id: str, a: str, b: str, request: Request, db: Session = Depends(get_db)) -> CompareOut:
-    """The Compare tab: two analyses of this plot (ids from GET /plots/{id}); the earlier photo is "before".
-    Difference table and notes in between come from code; the summary from the report agent (validated)."""
-    plot = _plot_or_404(db, plot_id)
-    if a == b:
-        raise HTTPException(422, "Pick two different photos.")
-    picked = [db.get(Analysis, x) for x in (a, b)]
-    if any(p is None or p.plot_id != plot.id for p in picked):
-        raise HTTPException(404, "Both analyses must belong to this plot.")
-    if any(p.status != "done" or not p.result for p in picked):
-        raise HTTPException(409, "Both analyses must be finished.")
-    before, after = sorted(picked, key=lambda x: (x.captured_at, x.created_at))
-    notes = db.scalars(
-        select(Note)
-        .where(Note.plot_id == plot.id, Note.noted_on > before.captured_at, Note.noted_on <= after.captured_at)
-        .order_by(Note.noted_on, Note.created_at)
-    ).all()
-    crops = [plot.crop, *(plot.other_crops or [])] if plot.mixed else [plot.crop]
-    storage = get_storage()
-    out = comparing.compare(
-        " + ".join(crop_label(c) for c in crops),
-        before,
-        after,
-        [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text[:300]} for n in notes],
-        (storage.get(before.image_key), storage.get(after.image_key)),
-        get_llm() if report_agent.enabled() else None,
-    )
-    base = str(request.base_url).rstrip("/")
-
-    def side(x: Analysis) -> CompareSide:
-        return CompareSide(
-            analysis_id=x.id,
-            captured_at=x.captured_at,
-            days_after_planting=x.result.get("days_after_planting"),
-            image_url=_image_url(request, x.image_key),
-            overlay_url=f"{base}/analyses/{x.id}/overlay.png",
-        )
-
-    return CompareOut(
-        plot_id=plot.id,
-        before=side(before),
-        after=side(after),
-        days_between=out["days_between"],
-        rows=[CompareRow(**r) for r in out["rows"]],
-        by_crop=out["by_crop"],
-        notes=[NoteOut(id=n.id, kind=n.kind, date=n.noted_on, text=n.text) for n in notes],
-        summary=out["summary"],
-        next_step=out["next_step"],
-        written_by=out["written_by"],
-        validator=out["validator"],
-    )
-
-
 @app.delete("/plots/{plot_id}", status_code=204)
 def delete_plot(plot_id: str, device: str | None = Depends(owner), db: Session = Depends(get_db)) -> Response:
     plot = _plot_or_404(db, plot_id)
@@ -493,69 +418,16 @@ def create_analysis(
     return _analysis_out(analysis, request)
 
 
-@app.post("/plots/{plot_id}/videos", response_model=AnalysisOut, status_code=202)
-def create_video_analysis(
-    plot_id: str,
-    request: Request,
-    file: UploadFile = File(...),
-    captured_at: dt.date | None = Form(default=None),
-    device: str | None = Depends(owner),
-    db: Session = Depends(get_db),
-):
-    """Upload a row-walk video (MP4/MOV, ~15 s). Returns `pending`; poll GET /analyses/{id}."""
-    plot = _plot_or_404(db, plot_id)
-    _require_owner(plot, device)
-    suffix = "." + (file.filename or "row.mp4").rsplit(".", 1)[-1].lower()
-    if suffix not in VIDEO_TYPES:
-        suffix = ".mp4"
-    data = file.file.read(MAX_VIDEO_BYTES + 1)
-    if len(data) > MAX_VIDEO_BYTES:
-        raise HTTPException(413, "Video is larger than 150 MB; record about 15 seconds.")
-    try:
-        still, width, height = still_jpeg(data, suffix)
-    except Exception:
-        raise HTTPException(400, "Could not read this file as a video (MP4 or MOV).") from None
-    analysis_id = new_id("a")
-    video_key = f"plots/{plot.id}/{analysis_id}{suffix}"
-    web = to_web_mp4(data, suffix)  # small H.264 copy every browser plays; keep only that
-    if web is not None:
-        data, suffix, video_key = web, ".mp4", f"plots/{plot.id}/{analysis_id}.web.mp4"
-    image_key = f"plots/{plot.id}/{analysis_id}.jpg"
-    storage = get_storage()
-    storage.put(video_key, data, VIDEO_TYPES[suffix])
-    storage.put(image_key, still, "image/jpeg")
-    analysis = Analysis(
-        id=analysis_id,
-        plot_id=plot.id,
-        mode="video",
-        captured_at=captured_at or dt.date.today(),
-        image_key=image_key,
-        video_key=video_key,
-        image_width=width,
-        image_height=height,
-        status="pending",
-        trace=[],
-    )
-    db.add(analysis)
-    db.commit()
-    submit(analysis.id)
-    db.refresh(analysis)
-    return _analysis_out(analysis, request)
-
-
 @app.get("/analyses/{analysis_id}", response_model=AnalysisOut)
 def get_analysis(analysis_id: str, request: Request, db: Session = Depends(get_db)):
-    analysis = db.get(Analysis, analysis_id)
-    if analysis is None:
-        raise HTTPException(404, "Analysis not found")
-    return _analysis_out(analysis, request)
+    return _analysis_out(_analysis_or_404(db, analysis_id), request)
 
 
 @app.get("/analyses/{analysis_id}/overlay.png", response_class=Response)
 def analysis_overlay(analysis_id: str, db: Session = Depends(get_db)) -> Response:
     """The photo with the final masks, colored by class (crop green, weed magenta, A4 blue)."""
     analysis = _analysis_or_404(db, analysis_id)
-    if not analysis.result or analysis.mode != "photo":
+    if not analysis.result:
         raise HTTPException(409, "No mask picture for this analysis.")
     rgb = np.array(Image.open(io.BytesIO(get_storage().get(analysis.image_key))).convert("RGB"))
     return Response(to_png(render_analysis(rgb, analysis.result)), media_type="image/png")
@@ -594,9 +466,7 @@ def sam_call_image(analysis_id: str, prompt: str, db: Session = Depends(get_db))
 
 @app.post("/analyses/{analysis_id}/rerun", response_model=AnalysisOut, status_code=202)
 def rerun_analysis(analysis_id: str, request: Request, device: str | None = Depends(owner), db: Session = Depends(get_db)):
-    analysis = db.get(Analysis, analysis_id)
-    if analysis is None:
-        raise HTTPException(404, "Analysis not found")
+    analysis = _analysis_or_404(db, analysis_id)
     _require_owner(analysis.plot, device)
     analysis.status, analysis.result, analysis.error, analysis.trace = "pending", None, None, []
     db.commit()
@@ -626,8 +496,6 @@ CSV_COLUMNS = [
     "mean_plant_area_unit",
     "image_quality",
     "consult_agronomist",
-    "row_plant_count",
-    "mode",
 ]
 
 
@@ -639,9 +507,6 @@ def export_csv(plot_id: str, db: Session = Depends(get_db)) -> Response:
     writer.writerow(CSV_COLUMNS)
     for a in _ordered(plot.analyses):
         if a.status != "done" or not a.result:
-            continue
-        if a.mode == "video":
-            writer.writerow([a.captured_at.isoformat(), a.id] + [""] * 8 + [a.result["row_plant_count"], "video"])
             continue
         m = a.result["metrics"]
 
@@ -660,8 +525,6 @@ def export_csv(plot_id: str, db: Session = Depends(get_db)) -> Response:
                 m["mean_plant_area"]["unit"],
                 a.result["image_quality"]["level"],
                 a.result["health"]["consult_agronomist"],
-                "",
-                "photo",
             ]
         )
     filename = re.sub(r"[^A-Za-z0-9_-]+", "-", plot.name).strip("-") or plot.id
@@ -679,7 +542,7 @@ def export_csv(plot_id: str, db: Session = Depends(get_db)) -> Response:
 def todays_water(plot_id: str, db: Session = Depends(get_db)) -> dict:
     """Today's water need from the latest crop cover (FAO-56, Open-Meteo ET0)."""
     plot = _plot_or_404(db, plot_id)
-    done = [a for a in _ordered(plot.analyses) if a.status == "done" and a.mode == "photo"]
+    done = [a for a in _ordered(plot.analyses) if a.status == "done"]
     cover = done[-1].result["metrics"]["canopy_cover_pct"]["value"] if done else None
     day = (dt.date.today() - plot.planted_on).days if plot.planted_on else None
     out = water_need(plot.crop, day, cover, plot.area_m2, plot.lat, plot.lon)
@@ -695,12 +558,77 @@ def crop_reference(crop_id: str, day: int) -> dict:
     return {**info, "note": LIBRARY_NOTE}
 
 
-COMPARE_ROWS = [
-    ("plant_count", "Plants", "plants"),
-    ("canopy_cover_pct", "Crop cover", "%"),
-    ("weed_share_pct", "Weed share", "%"),
-    ("lesion_share_pct", "Leaf spots", "%"),
-    ("mean_plant_area", "Mean plant size", None),
-]
+def _plot_label(plot: Plot) -> str:
+    crops = [plot.crop, *(plot.other_crops or [])] if plot.mixed else [plot.crop]
+    return " + ".join(crop_label(c) for c in crops)
 
 
+def _grower(db: Session, plot: Plot) -> User | None:
+    """The account that owns the plot (its profile sets the agents' tone); None for guests and demo plots."""
+    return db.get(User, plot.device_id) if plot.device_id and plot.device_id.startswith("u_") else None
+
+
+@app.get("/plots/{plot_id}/compare", response_model=CompareOut)
+def compare_two(plot_id: str, a: str, b: str, request: Request, db: Session = Depends(get_db)) -> CompareOut:
+    """The Compare tab: two analyses of this plot (ids from GET /plots/{id}); the earlier photo is "before".
+    The difference table (plants per crop too in a mixed bed) and the notes in between come from code; the
+    summary from the report agent, written from both photos and validated (a template without an LLM).
+    The agent's text is kept on the later analysis, so opening the same pair again costs nothing."""
+    plot = _plot_or_404(db, plot_id)
+    if a == b:
+        raise HTTPException(422, "Pick two different photos.")
+    picked = [_analysis_or_404(db, x) for x in (a, b)]
+    if any(p.plot_id != plot.id for p in picked):
+        raise HTTPException(404, "Both analyses must belong to this plot.")
+    if any(p.status != "done" or not p.result for p in picked):
+        raise HTTPException(409, "Both analyses must be finished.")
+    before, after = sorted(picked, key=lambda x: (x.captured_at, x.created_at))
+    notes = [n for n in sorted(plot.notes, key=lambda n: (n.noted_on, n.created_at)) if before.captured_at < n.noted_on <= after.captured_at]
+    note_dicts = [{"date": n.noted_on.isoformat(), "kind": n.kind, "text": n.text[:300]} for n in notes]
+    cache_key = f"{before.id}:{len(notes)}"
+    cached = (after.result.get("compare_summaries") or {}).get(cache_key)
+    storage = get_storage()
+    if cached:  # the table is cheap to redo; only the written text is kept
+        out = {**comparing.compare(_plot_label(plot), before, after, note_dicts, None, None), **cached}
+    else:
+        grower = _grower(db, plot)
+        writer = get_llm() if current_strategy() == "agent" and settings.enable_summary and report_agent.enabled() else None
+        out = comparing.compare(
+            _plot_label(plot),
+            before,
+            after,
+            note_dicts,
+            (storage.get(before.image_key), storage.get(after.image_key)) if writer else None,
+            writer,
+            experience=grower.experience if grower else None,
+        )
+        if not plot.is_demo or out["written_by"] == "agent":  # demo plots keep only agent text
+            result = dict(after.result)
+            text = {k: out[k] for k in ("summary", "next_step", "written_by", "validator")}
+            result["compare_summaries"] = {**(result.get("compare_summaries") or {}), cache_key: text}
+            after.result = result
+            db.commit()
+    base = str(request.base_url).rstrip("/")
+
+    def side(x: Analysis) -> CompareSide:
+        return CompareSide(
+            analysis_id=x.id,
+            captured_at=x.captured_at,
+            days_after_planting=x.result.get("days_after_planting"),
+            image_url=_image_url(request, x.image_key),
+            overlay_url=f"{base}/analyses/{x.id}/overlay.png",
+        )
+
+    return CompareOut(
+        plot_id=plot.id,
+        before=side(before),
+        after=side(after),
+        days_between=out["days_between"],
+        rows=[CompareRow(**r) for r in out["rows"]],
+        by_crop=out["by_crop"],
+        notes=[NoteOut(id=n.id, kind=n.kind, date=n.noted_on, text=n.text) for n in notes],
+        summary=out["summary"],
+        next_step=out["next_step"],
+        written_by=out["written_by"],
+        validator=out["validator"],
+    )

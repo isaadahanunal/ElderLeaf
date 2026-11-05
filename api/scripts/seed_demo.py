@@ -4,7 +4,7 @@
     uv run python scripts/seed_demo.py demo/manifest.json            # add / refresh demo plots
     uv run python scripts/seed_demo.py demo/manifest.json --reset    # delete all demo plots first
 
-Every photo and video in the manifest runs through the normal pipeline once (SAM 3.1 + Muse Spark,
+Every photo in the manifest runs through the normal pipeline once (SAM 3.1 + Muse Spark,
 same as a grower's upload) and the results are stored. Visitors then only read stored results:
 opening the demo costs no API credits, and it keeps working if the credits run out.
 
@@ -16,7 +16,6 @@ Manifest (paths are relative to the manifest file):
       "name": "Bed 3 · lettuce", "crop": "lettuce", "planted_on": "2026-10-01",
       "area_m2": 6, "lat": 39.891, "lon": 32.783,
       "photos": [{"file": "bed3_1029.jpg", "date": "2026-10-29"}, {"file": "bed3_1103.jpg", "date": "2026-11-03"}],
-      "videos": [{"file": "bed3_row1.mp4", "date": "2026-11-03"}],
       "notes":  [{"kind": "watering", "date": "2026-11-01", "text": "Watered about 10 L in the evening"}]
     }
   ]
@@ -37,13 +36,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select  # noqa: E402
 
-from elderleaf.app import VIDEO_TYPES  # noqa: E402
 from elderleaf.crops import CROPS  # noqa: E402
 from elderleaf.db import Analysis, Note, Plot, SessionLocal, init_db, new_id  # noqa: E402
 from elderleaf.pipeline import prepare_upload, run_analysis, segmenter_name  # noqa: E402
 from elderleaf.config import settings  # noqa: E402
 from elderleaf.storage import get_storage  # noqa: E402
-from elderleaf.video import still_jpeg  # noqa: E402
 
 
 def main() -> None:
@@ -97,30 +94,18 @@ def main() -> None:
             db.commit()
             print(f"plot {plot.name} ({plot.id})")
 
-            uploads = [("photo", x) for x in p.get("photos", [])] + [("video", x) for x in p.get("videos", [])]
-            uploads.sort(key=lambda u: (u[1]["date"], u[0] == "video"))  # history is built in date order
-            for mode, item in uploads:
+            for item in sorted(p.get("photos", []), key=lambda x: x["date"]):  # history is built in date order
                 data = (base / item["file"]).read_bytes()
                 analysis_id = new_id("a")
-                video_key = None
-                if mode == "photo":
-                    jpeg, width, height = prepare_upload(data, settings.analysis_max_side)
-                else:
-                    suffix = Path(item["file"]).suffix.lower()
-                    suffix = suffix if suffix in VIDEO_TYPES else ".mp4"
-                    jpeg, width, height = still_jpeg(data, suffix)
-                    video_key = f"plots/{plot.id}/{analysis_id}{suffix}"
-                    storage.put(video_key, data, VIDEO_TYPES[suffix])
+                jpeg, width, height = prepare_upload(data, settings.analysis_max_side)
                 image_key = f"plots/{plot.id}/{analysis_id}.jpg"
                 storage.put(image_key, jpeg, "image/jpeg")
                 db.add(
                     Analysis(
                         id=analysis_id,
                         plot_id=plot.id,
-                        mode=mode,
                         captured_at=dt.date.fromisoformat(item["date"]),
                         image_key=image_key,
-                        video_key=video_key,
                         image_width=width,
                         image_height=height,
                         status="pending",
@@ -131,7 +116,7 @@ def main() -> None:
                 run_analysis(analysis_id)
                 db.expire_all()
                 done = db.get(Analysis, analysis_id)
-                print(f"  {mode} {item['file']} {item['date']}: {done.status} {done.error or ''}")
+                print(f"  photo {item['file']} {item['date']}: {done.status} {done.error or ''}")
 
 
 if __name__ == "__main__":

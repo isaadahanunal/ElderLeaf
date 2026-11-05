@@ -8,7 +8,7 @@ import { MaskOverlay } from "@/components/MaskOverlay";
 import { AssistantCard, assistantText, CoverCard, PlantsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
 import { Sheet } from "@/components/Sheet";
 import { TrendCharts } from "@/components/TrendCharts";
-import { IconCamera, IconChevronRight, IconDownload, IconDroplet, IconNote, IconVideo } from "@/components/icons";
+import { IconCamera, IconChevronRight, IconDownload, IconDroplet, IconNote } from "@/components/icons";
 import {
   BackLink,
   Button,
@@ -60,7 +60,7 @@ export function PlotView() {
       </div>
     );
 
-  const photos = plot.analyses.filter((a) => a.mode === "photo" && a.status === "done");
+  const photos = plot.analyses.filter((a) => a.status === "done");
   const cover = photos.at(-1)?.image_url ?? plot.latest?.image_url;
   const meta = [
     plot.crop_label,
@@ -94,9 +94,6 @@ export function PlotView() {
             <div className="flex shrink-0 gap-2">
               <LinkButton href={`/analyze?plot=${plot.id}`} variant="gold">
                 <IconCamera size={16} /> Take photo
-              </LinkButton>
-              <LinkButton href={`/analyze?plot=${plot.id}&mode=video`} variant="glass">
-                <IconVideo size={16} /> Row video
               </LinkButton>
             </div>
           )}
@@ -145,7 +142,7 @@ function Empty({ title, text, action }: { title: string; text: string; action?: 
 // ------------------------------------------------------------------ overview
 
 function Overview({ plot }: { plot: PlotDetail }) {
-  const photos = plot.analyses.filter((a) => a.mode === "photo" && a.status === "done");
+  const photos = plot.analyses.filter((a) => a.status === "done");
   const latestPhoto = photos.at(-1);
   const [latest, setLatest] = useState<AnalysisOut | null>(null);
   const [water, setWater] = useState<Irrigation | null | undefined>(undefined);
@@ -276,7 +273,7 @@ function EntryCard({ a }: { a: AnalysisSummary }) {
       <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-[#e9e4da]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={a.image_url} alt="" className="h-full w-full object-cover" />
-        <span className="absolute bottom-1 left-1 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-ink">{a.mode === "video" ? <IconVideo size={13} /> : <IconCamera size={13} />}</span>
+        <span className="absolute bottom-1 left-1 grid h-6 w-6 place-items-center rounded-full bg-white/90 text-ink"><IconCamera size={13} /></span>
       </div>
       <div className="min-w-0 flex-1 py-0.5">
         <div className="flex items-center justify-between gap-2">
@@ -288,18 +285,13 @@ function EntryCard({ a }: { a: AnalysisSummary }) {
           )}
           {a.status === "failed" && <Chip tone="warn">Failed</Chip>}
         </div>
-        {a.status === "done" &&
-          (a.mode === "video" ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Stat m="plants" text={`${a.row_plant_count ?? "–"} plants in the row`} />
-            </div>
-          ) : (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Stat m="plants" text={`${fmt(a.plant_count, 0)} plants`} />
-              <Stat m="cover" text={`${fmt(a.canopy_cover_pct)}% cover`} />
-              <Stat m="weeds" text={`${fmt(a.weed_share_pct)}% weeds`} />
-            </div>
-          ))}
+        {a.status === "done" && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Stat m="plants" text={`${fmt(a.plant_count, 0)} plants`} />
+            <Stat m="cover" text={`${fmt(a.canopy_cover_pct)}% cover`} />
+            <Stat m="weeds" text={`${fmt(a.weed_share_pct)}% weeds`} />
+          </div>
+        )}
         {a.attention.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {a.attention.map((t) => (

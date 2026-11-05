@@ -39,6 +39,9 @@ export function NewPlotForm({ onCancel, onDone, bare = false }: { onCancel: () =
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [crop, setCrop] = useState("lettuce");
+  // more than one crop in the same photo: the agent then lists every kind of plant it sees (scan mode)
+  const [mixed, setMixed] = useState(false);
+  const [others, setOthers] = useState<string[]>([]);
   const [loc, setLoc] = useState<{ lat: number; lon: number } | null>(null);
   const [locState, setLocState] = useState<"asking" | "denied" | "done">("asking");
 
@@ -58,12 +61,18 @@ export function NewPlotForm({ onCancel, onDone, bare = false }: { onCancel: () =
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const num = (k: string) => (f.get(k) ? Number(f.get(k)) : null);
+    if (mixed && others.length === 0) {
+      setError("Pick the other crops in this bed, or choose One crop.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const plot = await api.createPlot({
         name: String(f.get("name")),
         crop,
+        mixed,
+        other_crops: mixed ? others : [],
         planted_on: f.get("planted_on") || null,
         area_m2: num("area_m2"),
         row_spacing_cm: num("row_spacing_cm"),
@@ -93,7 +102,10 @@ export function NewPlotForm({ onCancel, onDone, bare = false }: { onCancel: () =
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setCrop(id)}
+                  onClick={() => {
+                    setCrop(id);
+                    setOthers((o) => o.filter((x) => x !== id));
+                  }}
                   className={`h-9 rounded-full px-4 text-sm font-semibold transition ${crop === id ? "bg-brand text-white shadow-sm" : "bg-well text-ink-2 hover:bg-[#ebe7de]"}`}
                 >
                   {label}
@@ -101,6 +113,42 @@ export function NewPlotForm({ onCancel, onDone, bare = false }: { onCancel: () =
               ))}
             </div>
           </div>
+          <div>
+            <span className="mb-1.5 block text-[13px] font-semibold text-ink-2">Crops in the photo</span>
+            <div className="flex flex-wrap gap-2">
+              {([[false, "One crop"], [true, "More than one"]] as const).map(([value, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setMixed(value)}
+                  className={`h-9 rounded-full px-4 text-sm font-semibold transition ${mixed === value ? "bg-brand text-white shadow-sm" : "bg-well text-ink-2 hover:bg-[#ebe7de]"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="mt-1 block text-xs text-muted">
+              {mixed ? "ElderLeaf lists every kind of plant it sees and counts each crop." : "ElderLeaf picks the best search words for this crop."}
+            </span>
+          </div>
+          {mixed && (
+            <div>
+              <span className="mb-1.5 block text-[13px] font-semibold text-ink-2">Other crops in the same photo</span>
+              <div className="flex flex-wrap gap-2">
+                {CROPS.filter(([id]) => id !== crop).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setOthers((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]))}
+                    className={`h-9 rounded-full px-4 text-sm font-semibold transition ${others.includes(id) ? "bg-brand text-white shadow-sm" : "bg-well text-ink-2 hover:bg-[#ebe7de]"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="mt-1 block text-xs text-muted">Pick &quot;Other&quot; if you are not sure what it is.</span>
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Planted on" hint="To tell if growth is normal for its age.">
               <input name="planted_on" type="date" max={today()} className={inputClass} />

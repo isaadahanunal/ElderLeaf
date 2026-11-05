@@ -69,10 +69,5 @@ class Settings:
     # irrigation (Open-Meteo, no key)
     weather_url: str | None = _env("WEATHER_URL")
 
-    # row video: frames sampled per second, and the most frames sent to SAM per video
-    video_fps: float = float(_env("VIDEO_FPS", "2"))
-    video_max_frames: int = int(_env("VIDEO_MAX_FRAMES", "40"))
-    video_max_side: int = int(_env("VIDEO_MAX_SIDE", "960"))
-
 
 settings = Settings()

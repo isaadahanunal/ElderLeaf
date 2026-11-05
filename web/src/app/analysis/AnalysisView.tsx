@@ -6,7 +6,6 @@ import { AnalysisOut, AnalysisResult, api, fmt, fmtDate, isNativeApp, MaskOut, P
 import { LayerToggles, MaskOverlay } from "@/components/MaskOverlay";
 import { AssistantCard, assistantText, CoverCard, HealthCard, PlantsCard, SizeCard, SpotsCard, WaterCard, WeedsCard, weedFlag } from "@/components/MetricCards";
 import { ReportCard } from "@/components/ReportCard";
-import { RowVideo } from "@/components/RowVideo";
 import { ShareResult } from "@/components/ShareResult";
 import { AgentSteps } from "@/components/Trace";
 import { IconDownload, IconSparkle, IconSprout } from "@/components/icons";
@@ -58,12 +57,11 @@ export function AnalysisView() {
 
   const r = a?.result;
   const stats = r?.run_stats;
-  const vstats = a?.video_result?.run_stats;
   const tech = [
-    r?.segmenter ?? a?.video_result?.segmenter,
-    stats ? `${stats.sam_calls} SAM calls` : vstats?.sam_calls !== undefined ? `${vstats.sam_calls} SAM calls` : null,
-    stats ? `$${(stats.total_cost_usd ?? stats.sam_cost_usd).toFixed(3)}` : vstats?.sam_cost_usd !== undefined ? `$${vstats.sam_cost_usd.toFixed(3)}` : null,
-    stats ? `${stats.wall_time_s.toFixed(0)} s` : vstats?.wall_time_s !== undefined ? `${vstats.wall_time_s.toFixed(0)} s` : null,
+    r?.segmenter,
+    stats ? `${stats.sam_calls} SAM calls` : null,
+    stats ? `$${(stats.total_cost_usd ?? stats.sam_cost_usd).toFixed(3)}` : null,
+    stats ? `${stats.wall_time_s.toFixed(0)} s` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -85,10 +83,10 @@ export function AnalysisView() {
       <BackLink href={a ? `/plot?id=${a.plot_id}` : "/"} label="Back to plot" />
       <div className="mb-6">
         <div className="text-[13px] font-semibold uppercase tracking-[0.14em] text-[#8a6a35]">
-          {a ? `${a.mode === "video" ? "Row count" : "Photo"} · ${fmtDate(a.captured_at)}` : "\u00a0"}
+          {a ? `Photo · ${fmtDate(a.captured_at)}` : "\u00a0"}
         </div>
         <h1 className="font-display mt-1 line-clamp-2 text-[32px] font-semibold leading-[1.08] sm:text-[36px]">
-          {plot?.name ?? (a?.mode === "video" ? "Row count" : "Photo analysis")}
+          {plot?.name ?? "Photo analysis"}
         </h1>
       </div>
       {error && <ErrorBox message={error} />}
@@ -101,7 +99,6 @@ export function AnalysisView() {
         </div>
       )}
       {a?.status === "done" && r && <PhotoResult a={a} r={r} plot={plot} tech={tech} json={json} />}
-      {a?.status === "done" && a.video_result && a.video_url && <VideoDone a={a} tech={tech} />}
     </>
   );
 }
@@ -122,7 +119,7 @@ function Running({ a }: { a: AnalysisOut }) {
               <IconSparkle size={20} />
             </span>
             <div className="min-w-0">
-              <div className="font-display text-[20px] font-semibold leading-tight">{a.mode === "video" ? "Following every plant…" : "Measuring your plot…"}</div>
+              <div className="font-display text-[20px] font-semibold leading-tight">Measuring your plot…</div>
               <div className="flex items-center gap-2 truncate text-[13px] text-[#f6efe2]/75">
                 <Spinner className="h-3 w-3 shrink-0" />
                 {current ? `${current.label}${current.input && current.tool === "run_sam" ? ` · “${current.input}”` : ""}` : "Starting the agent"}
@@ -173,7 +170,7 @@ function PhotoResult({ a, r, plot, tech, json }: { a: AnalysisOut; r: AnalysisRe
   const m = r.metrics;
   const d = r.comparison?.deltas ?? {};
   // history up to this analysis, for the little bar charts
-  const upTo = (plot?.analyses ?? []).filter((x) => x.mode === "photo" && x.status === "done" && x.captured_at <= a.captured_at);
+  const upTo = (plot?.analyses ?? []).filter((x) => x.status === "done" && x.captured_at <= a.captured_at);
   const quality = r.image_quality;
   return (
     <div className="space-y-6">
@@ -318,53 +315,4 @@ function downloadJson(r: AnalysisResult) {
   link.download = `elderleaf-${r.analysis_id}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-// ------------------------------------------------------------------ video
-
-function VideoDone({ a, tech }: { a: AnalysisOut; tech: string }) {
-  const v = a.video_result!;
-  return (
-    <div className="space-y-6">
-      <SegmenterNotice name={v.segmenter} />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-        <RowVideo src={a.video_url!} result={v} />
-        <div className="space-y-4">
-          <Card>
-            <div className="flex items-center gap-4">
-              <span className="grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[#1f9d551a] text-plants">
-                <IconSprout size={30} />
-              </span>
-              <div>
-                <div className="tabular text-5xl font-bold leading-none tracking-tight">{v.row_plant_count}</div>
-                <div className="mt-1 text-sm text-muted">plants in this row, each counted once</div>
-              </div>
-            </div>
-            <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-              {[
-                [`${v.duration_s.toFixed(0)} s`, "video"],
-                [String(v.frames.length), "frames checked"],
-                [String(v.max_per_frame), "max in view"],
-              ].map(([val, label]) => (
-                <div key={label} className="rounded-2xl bg-well px-2 py-3">
-                  <div className="tabular text-lg font-bold">{val}</div>
-                  <div className="text-xs text-muted">{label}</div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex items-center justify-between">
-              <Chip>SAM phrase “{v.prompt}”</Chip>
-              <InfoTip label="How it's counted">{v.how}</InfoTip>
-            </div>
-          </Card>
-          {v.context
-            .filter((c) => c.status === "attention")
-            .map((c, i) => (
-              <Notice key={i}>{c.text}</Notice>
-            ))}
-        </div>
-      </div>
-      <AgentSteps steps={a.trace} meta={tech} />
-    </div>
-  );
 }

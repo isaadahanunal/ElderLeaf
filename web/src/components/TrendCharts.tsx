@@ -10,14 +10,13 @@ import { Card, CardHead, METRIC, MetricKey } from "./ui";
 const GRID = "#eef0f3";
 const MUTED = "#85858f";
 
-type Key = "plant_count" | "canopy_cover_pct" | "weed_share_pct" | "lesion_share_pct" | "row_plant_count";
+type Key = "plant_count" | "canopy_cover_pct" | "weed_share_pct" | "lesion_share_pct";
 
 const CHARTS: { key: Key; m: MetricKey; title: string; unit: string }[] = [
   { key: "plant_count", m: "plants", title: "Plants in the photo", unit: "" },
   { key: "canopy_cover_pct", m: "cover", title: "Crop cover", unit: "%" },
   { key: "weed_share_pct", m: "weeds", title: "Weed share", unit: "%" },
   { key: "lesion_share_pct", m: "spots", title: "Leaf spots", unit: "%" },
-  { key: "row_plant_count", m: "plants", title: "Plants in the row (video)", unit: "" },
 ];
 
 export function TrendCharts({ analyses }: { analyses: AnalysisSummary[] }) {

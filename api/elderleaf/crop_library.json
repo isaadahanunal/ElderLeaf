@@ -1,5 +1,5 @@
 {
-  "_about": "Stage lengths (days: initial, development, mid-season, late), crop coefficients (Kc ini/mid/end) and max height (m) are approximate values after FAO Irrigation and Drainage Paper 56, Tables 11 and 12 (Mediterranean / spring plantings). cover_max is the crop cover (fraction of ground seen from above) a well-grown plot reaches at mid-season; it is an ElderLeaf rule of thumb, not an FAO value.",
+  "_about": "Stage lengths (days: initial, development, mid-season, late), crop coefficients (Kc ini/mid/end) and max height (m) are approximate values after FAO Irrigation and Drainage Paper 56, Tables 11 and 12 (Mediterranean / spring plantings). cover_max is the crop cover (fraction of ground seen from above) a well-grown plot reaches at mid-season; it is an ElderLeaf rule of thumb, not an FAO value. Garlic is not in FAO-56 Table 11, so its stage lengths are estimates.",
   "sugar_beet": {"label": "Sugar beet", "sam_prompt": "sugar beet plant", "stages": [25, 35, 50, 50], "kc": [0.35, 1.20, 0.70], "height_m": 0.5, "cover_max": 0.9},
   "lettuce": {"label": "Lettuce", "sam_prompt": "lettuce plant", "stages": [20, 30, 15, 10], "kc": [0.70, 1.00, 0.95], "height_m": 0.3, "cover_max": 0.8},
   "spinach": {"label": "Spinach", "sam_prompt": "spinach plant", "stages": [20, 20, 15, 5], "kc": [0.70, 1.00, 0.95], "height_m": 0.3, "cover_max": 0.8},

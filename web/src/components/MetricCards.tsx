@@ -265,6 +265,19 @@ export function HealthCard({ r, onShow }: { r: AnalysisResult; onShow?: (ids: st
   );
 }
 
+// The validator's reasons are written for the model; the grower sees them in plain words.
+function plainIssues(issues: string[]): string {
+  const kinds = new Set<string>();
+  for (const i of issues) {
+    if (i.startsWith("number")) kinds.add("a number that is not in your measurements");
+    else if (i.includes("chemical or product")) kinds.add("a product name");
+    else if (i.includes("gives a dose")) kinds.add("a dose");
+    else if (i.includes("disease or pest")) kinds.add("a diagnosis");
+    else kinds.add("an answer in the wrong format");
+  }
+  return [...kinds].join(" and ");
+}
+
 export function AssistantCard({ s, title = "ElderLeaf assistant", consult, compact }: { s: Summary; title?: string; consult?: boolean; compact?: boolean }) {
   return (
     <Card className={compact ? "" : "h-full"}>
@@ -278,7 +291,7 @@ export function AssistantCard({ s, title = "ElderLeaf assistant", consult, compa
         {(s.validator_issues.length > 0 || s.source === "agent") && (
           <InfoTip label="Validator">
             {s.validator_issues.length > 0
-              ? `Before you saw this, the validator rejected: ${s.validator_issues.join("; ")}.`
+              ? `Before you saw this, the fact check sent a draft back because of ${plainIssues(s.validator_issues)}. Every number in this text was then checked against your measurements.`
               : "Every number in this text was checked against your measurements. Chemical names, doses and disease names are not allowed."}
           </InfoTip>
         )}

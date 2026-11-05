@@ -1,4 +1,4 @@
-import { IconCamera, IconCheck, IconCover, IconDroplet, IconEye, IconSparkle, IconSprout, IconSteps, IconVideo } from "@/components/icons";
+import { IconCamera, IconCheck, IconCover, IconDroplet, IconEye, IconSparkle, IconSprout, IconSteps } from "@/components/icons";
 
 export const metadata = { title: "How ElderLeaf measures · ElderLeaf" };
 
@@ -58,30 +58,11 @@ export default function MethodPage() {
             </div>
             <div className="mt-4 font-bold">{s.title}</div>
             <p className="mt-1 text-[13px] leading-snug text-muted">{s.text}</p>
-            <code className="mt-3 inline-block rounded-full bg-well px-2.5 py-1 font-mono text-[11px] text-ink-2">{s.tool}</code>
           </div>
         ))}
       </div>
 
-      <div className="mt-10 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl bg-card p-6 shadow-[var(--shadow-card)]">
-          <div className="flex items-center gap-3">
-            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#1f9d551a] text-[#1f9d55]">
-              <IconVideo size={22} />
-            </span>
-            <div className="font-bold">Counting a whole row</div>
-          </div>
-          <div className="mt-5 flex flex-wrap items-center gap-2 text-[13px] font-semibold">
-            {["Walk 15 s", "SAM on 2 frames/s", "Follow camera motion", "Match plants by overlap", "Count each id once"].map((t, i, a) => (
-              <span key={t} className="flex items-center gap-2">
-                <span className="rounded-full bg-well px-3 py-1.5">{t}</span>
-                {i < a.length - 1 && <span className="text-muted">→</span>}
-              </span>
-            ))}
-          </div>
-          <p className="mt-4 text-[13px] text-muted">On a test walk past 12 plants, never all in view at once, it counts all 12, each once.</p>
-        </div>
-
+      <div className="mt-10">
         <div className="rounded-2xl bg-card p-6 shadow-[var(--shadow-card)]">
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#0891b21a] text-[#0891b2]">

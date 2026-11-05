@@ -98,7 +98,7 @@ function Hero({ hello, gardenName, plots }: { hello: string; gardenName: string 
   // your own plots if you have any, otherwise the demo garden
   const own = plots?.filter((p) => !p.is_demo) ?? [];
   const garden = own.length ? own : (plots ?? []);
-  const plants = garden.reduce((n, p) => n + (p.latest?.plant_count ?? p.latest?.row_plant_count ?? 0), 0);
+  const plants = garden.reduce((n, p) => n + (p.latest?.plant_count ?? 0), 0);
   const attention = garden.filter((p) => p.attention.length > 0).length;
   const last = garden
     .map((p) => p.latest?.captured_at)
@@ -175,7 +175,6 @@ function PlotGrid({ plots }: { plots: Plot[] }) {
 
 function PlotCard({ plot }: { plot: Plot }) {
   const l = plot.latest;
-  const video = l?.mode === "video";
   return (
     <Link href={`/plot?id=${plot.id}`} className="group block overflow-hidden rounded-[26px] bg-card shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)] active:scale-[0.99]">
       <div className="relative aspect-[16/11] bg-[#e9e4da]">
@@ -212,7 +211,7 @@ function PlotCard({ plot }: { plot: Plot }) {
         </div>
       </div>
       <div className="px-5 py-4">
-        {l && !video ? (
+        {l ? (
           <div className="grid grid-cols-3 items-center gap-2">
             <div>
               <div className="tabular text-[28px] font-bold leading-none">{fmt(l.plant_count, 0)}</div>
@@ -222,11 +221,6 @@ function PlotCard({ plot }: { plot: Plot }) {
             </div>
             <MiniRing label="cover" value={l.canopy_cover_pct} color={METRIC.cover.hex} />
             <MiniRing label="weeds" value={l.weed_share_pct} color={METRIC.weeds.hex} />
-          </div>
-        ) : l && video ? (
-          <div className="flex items-center gap-3">
-            <div className="tabular text-[28px] font-bold leading-none">{l.row_plant_count ?? "–"}</div>
-            <div className="text-xs text-muted">plants in the row, counted from a walking video</div>
           </div>
         ) : (
           <p className="flex items-center gap-1.5 text-sm font-semibold text-brand">

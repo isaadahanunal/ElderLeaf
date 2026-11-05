@@ -5,6 +5,22 @@ import { TraceStep } from "@/lib/api";
 import { IconAlert, IconCheck, IconMinus, IconSteps } from "./icons";
 import { Card, Spinner } from "./ui";
 
+// What each step is called on screen (the API's tool names stay out of sight).
+const STEP_NAMES: Record<string, string> = {
+  check_image_quality: "Photo check",
+  propose_prompts: "Search words",
+  scan_plants: "Plant list",
+  run_sam: "SAM 3.1",
+  compute_metrics: "Measuring",
+  get_plot_history: "History",
+  lookup_crop_info: "Crop guide",
+  get_weather: "Weather",
+  assess_health: "Health",
+  write_summary: "Writing",
+  validate: "Fact check",
+};
+const stepName = (s: TraceStep) => STEP_NAMES[s.tool] ?? s.label;
+
 function Dot({ status }: { status: TraceStep["status"] }) {
   const base = "grid h-7 w-7 shrink-0 place-items-center rounded-full";
   if (status === "running")
@@ -32,7 +48,8 @@ function Dot({ status }: { status: TraceStep["status"] }) {
   );
 }
 
-/** The agent's steps as a vertical timeline. `live` shows every step; otherwise details are folded. */
+/** The agent's steps as a vertical timeline, newest on top. `live` (while the analysis runs) keeps the
+ *  card at one height and scrolls inside it; otherwise details are folded. */
 export function AgentSteps({
   steps,
   live = false,
@@ -48,8 +65,9 @@ export function AgentSteps({
 }) {
   const [open, setOpen] = useState(live);
   const done = steps.filter((s) => s.status === "done").length;
+  const newestFirst = [...steps].reverse();
   return (
-    <Card>
+    <Card className={live ? "flex h-[min(62vh,560px)] flex-col" : ""}>
       <div className="flex items-center gap-3">
         <span className="grid h-[30px] w-[30px] place-items-center rounded-full bg-[#1111140f] text-ink">
           <IconSteps size={16} />
@@ -75,9 +93,9 @@ export function AgentSteps({
             <span
               key={s.step}
               title={`${s.label}: ${s.result ?? ""}`}
-              className={`rounded-full px-2.5 py-1 font-mono text-[11px] ${s.status === "done" ? "bg-brand-soft text-brand" : s.status === "failed" ? "bg-warn-soft text-warn" : "bg-well text-muted"}`}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${s.status === "done" ? "bg-brand-soft text-brand" : s.status === "failed" ? "bg-warn-soft text-warn" : "bg-well text-muted"}`}
             >
-              {s.tool}
+              {stepName(s)}
             </span>
           ))}
         </div>
@@ -91,18 +109,15 @@ export function AgentSteps({
               <Spinner /> Starting…
             </p>
           )}
-          <ol className="mt-4">
-            {steps.map((s, i) => (
-              <li key={s.step} className="relative flex gap-3 pb-4 last:pb-0">
-                {i < steps.length - 1 && <span className="absolute left-[13px] top-8 h-[calc(100%-2rem)] w-0.5 bg-line" />}
+          <ol className={live ? "-mr-2 mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2" : "mt-4"}>
+            {newestFirst.map((s, i) => (
+              <li key={s.step} className="fade-in relative flex gap-3 pb-4 last:pb-0">
+                {i < newestFirst.length - 1 && <span className="absolute left-[13px] top-8 h-[calc(100%-2rem)] w-0.5 bg-line" />}
                 <Dot status={s.status} />
                 <div className="min-w-0 pt-1">
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-sm font-semibold">{s.label}</span>
-                    <code className="font-mono text-[11px] text-muted">
-                      {s.tool}
-                      {s.input && s.tool === "run_sam" ? `("${s.input}")` : ""}
-                    </code>
+                    {s.input && s.tool === "run_sam" && <span className="text-[12px] text-muted">“{s.input}”</span>}
                   </div>
                   {s.result && <p className="mt-0.5 break-words text-[13px] text-muted">{s.result}</p>}
                   {s.image_url && (

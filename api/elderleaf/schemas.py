@@ -216,21 +216,6 @@ class RunStats(BaseModel):
     total_cost_usd: float | None = Field(description="None when the LLM price is unknown (set LLM_PRICE_*)")
     sam_latency_s: float
     wall_time_s: float
-    report_llm: LLMUsage | None = Field(default=None, description="the report agent's LLM calls, summed")
-
-
-class Irrigation(BaseModel):
-    date: dt.date
-    et0_mm: float = Field(description="reference evapotranspiration of the day (FAO-56), from Open-Meteo")
-    rain_mm: float | None
-    kc: float = Field(description="crop coefficient used: stage Kc capped by the measured crop cover")
-    kc_stage: float | None
-    stage: str | None
-    liters_per_m2: float
-    plot_total_liters: float | None
-    how: str
-    text: str
-    source: str
 
 
 class Report(BaseModel):
@@ -273,50 +258,8 @@ class AnalysisResult(BaseModel):
     crop_info: dict | None = Field(default=None, description="FAO-56 stage, Kc, expected cover")
     summary: Summary | None = Field(default=None, description="plain-language summary, now part of `report`")
     notes_since_previous: list[dict] = []
+    report: Report | None = Field(default=None, description="the report agent's combined report (GET /analyses/{id}/report.md)")
     run_stats: RunStats | None = None
-    agent_trace: list[TraceStep]
-
-
-# ------------------------------------------------------------------ row video
-
-
-class VideoBox(BaseModel):
-    track_id: int
-    box: list[int] = Field(description="x0, y0, x1, y1 in video frame pixels")
-    score: float | None
-
-
-class VideoFrame(BaseModel):
-    t: float = Field(description="seconds from the start of the video")
-    boxes: list[VideoBox]
-
-
-class VideoTrack(BaseModel):
-    track_id: int
-    frames: int = Field(description="sampled frames this plant was seen in")
-    first_t: float
-    last_t: float
-    mean_score: float | None
-    counted: bool = Field(description="false = too short or too weak to count (likely a false find)")
-
-
-class VideoResult(BaseModel):
-    analysis_id: str
-    plot_id: str
-    captured_at: dt.date
-    segmenter: str
-    prompt: str
-    width: int
-    height: int
-    duration_s: float
-    sampled_fps: float
-    row_plant_count: int
-    max_per_frame: int
-    frames: list[VideoFrame]
-    tracks: list[VideoTrack]
-    how: str
-    context: list[ContextItem] = []
-    run_stats: dict = {}
     agent_trace: list[TraceStep]
 
 
@@ -330,13 +273,12 @@ class CropOut(BaseModel):
 
 class AnalysisSummary(BaseModel):
     id: str
-    mode: str = "photo"
+    mode: str = Field(default="photo", description="always 'photo'; kept for app builds made before videos were removed")
     captured_at: dt.date
     status: str
     image_url: str
     summary: str | None = None
     plant_count: float | None = None
-    row_plant_count: int | None = None
     mean_plant_area: float | None = None
     mean_plant_area_unit: str | None = None
     canopy_cover_pct: float | None = None
@@ -348,16 +290,14 @@ class AnalysisSummary(BaseModel):
 class AnalysisOut(BaseModel):
     id: str
     plot_id: str
-    mode: str = "photo"
+    mode: str = Field(default="photo", description="always 'photo'; kept for app builds made before videos were removed")
     captured_at: dt.date
     status: str
     error: str | None
-    image_url: str = Field(description="the photo, or a still frame of the video")
-    video_url: str | None = None
+    image_url: str
     overlay_url: str | None = Field(description="picture of the final masks, colored by class")
     trace: list[TraceStep]
     result: AnalysisResult | None
-    video_result: VideoResult | None = None
 
 
 class NoteOut(BaseModel):
@@ -442,7 +382,6 @@ class UserOut(BaseModel):
 class UserStats(BaseModel):
     plots: int
     photos: int
-    videos: int
     notes: int
     plants_counted: int = Field(description="sum of the latest photo count of each plot")
     first_measured: dt.date | None

@@ -22,12 +22,6 @@ export const IconCamera = (p: P) => (
     <circle cx="12" cy="13" r="3.5" />
   </Svg>
 );
-export const IconVideo = (p: P) => (
-  <Svg {...p}>
-    <rect x="3" y="6" width="13" height="12" rx="2" />
-    <path d="M16 10l5-3v10l-5-3" />
-  </Svg>
-);
 export const IconUpload = (p: P) => (
   <Svg {...p}>
     <path d="M12 16V4M7 9l5-5 5 5M4 20h16" />

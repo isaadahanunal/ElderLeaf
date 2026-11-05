@@ -31,17 +31,19 @@ REPORT_REPLY = {
 
 
 class ScanLLM:
-    """First call: the scan list; later calls: the report."""
+    """The scan agent gets the plant list; the report writer ("You are ElderLeaf...") the report."""
 
     configured = True
 
     def __init__(self):
-        self.calls = 0
+        self.scan_calls, self.writer_requests = 0, []
 
     def chat(self, messages, **kwargs):
-        self.calls += 1
-        reply = SCAN_REPLY if self.calls == 1 else REPORT_REPLY
-        return LLMResult(json.dumps(reply), "fake", "fake-spark", 1800, 350, 250, 1.0, 0.004, False)
+        if messages[0]["content"].startswith("You are ElderLeaf"):
+            self.writer_requests.append(messages)
+            return LLMResult(json.dumps(REPORT_REPLY), "fake", "fake-spark", 1800, 350, 250, 1.0, 0.004, False)
+        self.scan_calls += 1
+        return LLMResult(json.dumps(SCAN_REPLY), "fake", "fake-spark", 1800, 350, 250, 1.0, 0.004, False)
 
 
 def mixed_plot(c, **extra):
@@ -61,6 +63,7 @@ def test_mixed_bed_needs_its_other_crops(client):  # noqa: F811
     assert mixed_plot(client, other_crops=["banana"]).status_code == 422
     plot = mixed_plot(client).json()
     assert plot["mixed"] and plot["other_crops"] == ["tomato"] and plot["other_crop_labels"] == ["Tomato"]
+    assert plot["crop_label"] == "Lettuce + Tomato"  # the plot card shows every crop of the bed
     single = client.post("/plots", headers=DEVICE, json={"name": "One", "crop": "lettuce", "other_crops": ["tomato"]}).json()
     assert single["mixed"] is False and single["other_crops"] == []  # other crops only count for a mixed bed
 
@@ -86,7 +89,7 @@ def test_mixed_bed_scan_mode_with_fallback_words(client):  # noqa: F811
         pipeline.set_strategy(None)
         pipeline.set_llm(None)
     stats = result["run_stats"]
-    assert stats["strategy"] == "scan" and llm.calls == 1
+    assert stats["strategy"] == "scan" and llm.scan_calls == 1
     assert [i["phrase"] for i in stats["scan_items"]] == ["lettuce rosette", "tomato plant", "grass weed"]
     assert stats["proposals"] == {"lettuce": ["lettuce rosette"], "tomato": ["tomato plant"], "weed": ["grass weed"]}
     # every listed phrase is searched in round 1; lettuce found nothing confident, so round 2 tries its library word
@@ -100,20 +103,18 @@ def test_mixed_bed_scan_mode_with_fallback_words(client):  # noqa: F811
 
 
 def test_mixed_bed_report_agent_sees_each_crop(client):  # noqa: F811
-    from elderleaf import report_agent
-
     pipeline.set_strategy("agent")
     llm = ScanLLM()
     pipeline.set_llm(llm)
-    report_agent.set_enabled(True)
     try:
         result = analyse(client, mixed_plot(client).json()["id"])
     finally:
-        report_agent.set_enabled(None)
         pipeline.set_strategy(None)
         pipeline.set_llm(None)
-    assert llm.calls == 2  # the scan, then the report
+    assert llm.scan_calls == 1 and len(llm.writer_requests) == 1  # the scan, then the report
     assert result["report"]["written_by"] == "agent" and result["report"]["headline"] == REPORT_REPLY["headline"]
+    assert result["summary"]["source"] == "agent"
+    assert '"per_crop"' in llm.writer_requests[0][1]["content"][0]["text"]  # the writer sees each crop
     assert "Per crop: Lettuce 0 plants" in result["report"]["markdown"] and "Tomato 5 plants" in result["report"]["markdown"]
 
 

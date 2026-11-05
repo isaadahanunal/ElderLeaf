@@ -5,7 +5,7 @@
 Reads DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_KEY and SUPABASE_BUCKET from the repo's .env and:
   1. connects to Postgres, creates the tables (plots, analyses, notes, users, auth_sessions) and turns on
      row level security, so Supabase's public REST API can't read them;
-  2. creates the Storage bucket as public if it is missing (photos and videos are served from it);
+  2. creates the Storage bucket as public if it is missing (photos are served from it);
   3. uploads, reads back and deletes a small test file.
 Safe to run again: nothing that exists is changed or deleted.
 """

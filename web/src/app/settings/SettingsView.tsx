@@ -7,7 +7,7 @@ import { api, EXPERIENCE, Experience, fmtDate, isNativeApp } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { forgetWelcome, PLOTS_CHANGED } from "@/components/AppShell";
 import { ServerSettings } from "@/components/ServerSettings";
-import { IconBook, IconCamera, IconCheck, IconChevronRight, IconLogout, IconNote, IconSparkle, IconSprout, IconUser, IconVideo } from "@/components/icons";
+import { IconBook, IconCamera, IconCheck, IconChevronRight, IconLogout, IconNote, IconSparkle, IconSprout, IconUser } from "@/components/icons";
 import { Avatar, Button, Card, ErrorBox, Field, inputClass, LinkButton, PageHead, SectionTitle, Skeleton, Spinner } from "@/components/ui";
 
 /** Settings: your account (or sign in), the app's server (Android app), and about ElderLeaf. */
@@ -130,10 +130,9 @@ function SignedIn() {
         </div>
       </section>
 
-      <div className="stagger mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="stagger mt-5 grid grid-cols-3 gap-3">
         <Stat icon={<IconSprout size={18} />} color="#1f9d55" value={s.plants_counted} label="plants counted" />
         <Stat icon={<IconCamera size={18} />} color="#0891b2" value={s.photos} label={s.photos === 1 ? "photo analysed" : "photos analysed"} />
-        <Stat icon={<IconVideo size={18} />} color="#7c4dcc" value={s.videos} label={s.videos === 1 ? "row video" : "row videos"} />
         <Stat icon={<IconNote size={18} />} color="#e8590c" value={s.notes} label={s.notes === 1 ? "note" : "notes"} />
       </div>
       <p className="mt-2 px-1 text-xs text-muted">

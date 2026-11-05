@@ -39,7 +39,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- photo + row video from the camera (in-page camera with guide, and the capture buttons) -->
+    <!-- photos from the camera (in-page camera with guide, and the capture button) -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- plot location for the local weather (water need) -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

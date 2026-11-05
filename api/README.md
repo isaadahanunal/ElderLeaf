@@ -80,8 +80,8 @@ npx openapi-typescript http://localhost:8000/openapi.json -o ../web/src/api.d.ts
 - `elderleaf/pipeline.py`: runs the steps, compares with the previous photo, writes the context lines from templates
 
 - `elderleaf/health.py`: yellowing / browning measured in the crop masks (relative to the photo's own crop color), leaf-spot share
-- `elderleaf/agronomy.py` + `crop_agronomy.json`: FAO-56 Kc and stage lengths, growth stage of the day, water need (Kc × ET0)
-- `elderleaf/weather.py`: daily ET0 and rain for the plot's location from Open-Meteo (free, no key; `WEATHER=0` turns it off)
+- `elderleaf/crops.py` + `crop_library.json`: FAO-56 stage, Kc and typical crop cover of the day (`lookup_crop_info`)
+- `elderleaf/irrigation.py`: water need, FAO-56 Kc (scaled by the measured cover) x ET0 of the plot location (Open-Meteo)
 - `elderleaf/report_agent.py`: the report agent (below)
 
 No LLM produces a number.

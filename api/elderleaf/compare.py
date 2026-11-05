@@ -13,7 +13,7 @@ import json
 
 from .agent import _llm_image
 from .llm import LLMClient, image_part
-from .report_agent import fact_numbers, parse_reply, text_errors
+from .report_agent import EXPERIENCE_TONE, fact_numbers, parse_reply, text_errors, tidy
 
 COMPARED = [
     ("plant_count", "Plants"),
@@ -28,6 +28,7 @@ Rules:
 - Use only numbers that appear in the facts (you may round them). Never compute or invent a number.
 - Never diagnose, never name a disease, never recommend a pesticide or any chemical, product or dose.
 - If a note may explain a change (watering, weeding, thinning, harvest), say so, as a possibility.
+- Match the grower's experience (facts.grower): first season = explain every term; experienced = concise.
 - Plain, kind English: at most 3 short sentences.
 Answer with one JSON object and nothing else."""
 
@@ -88,16 +89,18 @@ def _signs(result: dict) -> list[dict]:
     return [{"type": s.get("type"), "likelihood": s.get("likelihood"), "share_of_crop_pct": s.get("share_pct")} for s in health.get("signs") or []]
 
 
-def compare(crop_label: str, before, after, notes: list[dict], images: tuple[bytes, bytes] | None, llm: LLMClient | None) -> dict:
+def compare(crop_label: str, before, after, notes: list[dict], images: tuple[bytes, bytes] | None, llm: LLMClient | None,
+            experience: str | None = None) -> dict:
     """`before` / `after` are finished Analysis rows (before is the earlier one)."""
     days = (after.captured_at - before.captured_at).days
     rows, by_crop = difference(before.result, after.result, days)
     out = {"days_between": days, "rows": rows, "by_crop": by_crop, "summary": _template(days, rows, notes), "next_step": None,
-           "written_by": "template", "validator": {"passed": False, "attempts": 0, "errors": ["no LLM; template summary used"]}}
+           "written_by": "template", "validator": {"passed": False, "attempts": 0, "errors": [], "issues": []}}
     if llm is None or not llm.configured or images is None:
         return out
     facts = {
         "crop": crop_label.lower(),
+        "grower": EXPERIENCE_TONE.get(experience or "", "unknown"),
         "earlier_photo": {"date": before.captured_at.isoformat(), "days_after_planting": before.result.get("days_after_planting"),
                           "possible_health_signs": _signs(before.result)},
         "later_photo": {"date": after.captured_at.isoformat(), "days_after_planting": after.result.get("days_after_planting"),
@@ -107,6 +110,7 @@ def compare(crop_label: str, before, after, notes: list[dict], images: tuple[byt
         "plants_per_crop": by_crop or None,
         "notes_between": notes,
     }
+    facts = tidy(facts)
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": [{"type": "text", "text": USER.format(facts=json.dumps(facts, indent=1))},
@@ -114,11 +118,12 @@ def compare(crop_label: str, before, after, notes: list[dict], images: tuple[byt
     ]
     allowed = fact_numbers(facts)
     errors: list[str] = []
+    issues: list[str] = []  # everything the validator rejected on the way
     for attempt in range(1, 3):
         try:
             result = llm.chat(messages)
         except Exception as exc:  # LLM down: keep the template
-            out["validator"] = {"passed": False, "attempts": attempt - 1, "errors": [f"LLM unavailable: {type(exc).__name__}"]}
+            out["validator"] = {"passed": False, "attempts": attempt - 1, "errors": [f"LLM unavailable: {type(exc).__name__}"], "issues": issues}
             return out
         reply = parse_reply(result.text)
         summary = reply.get("summary") if reply else None
@@ -129,9 +134,10 @@ def compare(crop_label: str, before, after, notes: list[dict], images: tuple[byt
             errors = text_errors([summary] + ([step] if isinstance(step, str) else []), allowed)
         if not errors:
             out.update(summary=summary.strip(), next_step=step.strip() if isinstance(step, str) and step.strip() else None,
-                       written_by="agent", validator={"passed": True, "attempts": attempt, "errors": []})
+                       written_by="agent", validator={"passed": True, "attempts": attempt, "errors": [], "issues": issues})
             return out
+        issues += errors
         messages += [{"role": "assistant", "content": result.text},
                      {"role": "user", "content": FIX.format(errors="\n".join(f"- {e}" for e in errors))}]
-    out["validator"] = {"passed": False, "attempts": 2, "errors": errors}
+    out["validator"] = {"passed": False, "attempts": 2, "errors": errors, "issues": issues}
     return out

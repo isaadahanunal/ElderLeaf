@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ReactNode } from "react";
 import { openCaptureSheet, openNewPlotSheet } from "@/components/AppShell";
-import { IconAlert, IconCamera, IconCheck, IconChevronRight, IconFlag, IconPlus, IconVideo } from "@/components/icons";
+import { IconAlert, IconCamera, IconCheck, IconChevronRight, IconFlag, IconPlus } from "@/components/icons";
 import { Button, METRIC, MetricKey, SectionTitle } from "@/components/ui";
 
 // each step is a shortcut: a link (href) or the camera sheet (camera)
@@ -136,7 +136,7 @@ export function GuideView() {
         </div>
       </section>
 
-      <section className="mt-10 grid gap-3 md:grid-cols-2">
+      <section className="mt-10">
         <div className="rounded-[22px] bg-card p-5 shadow-[var(--shadow-card)]">
           <div className="text-[16px] font-semibold">A good photo</div>
           <ul className="mt-3 space-y-2.5">
@@ -151,18 +151,6 @@ export function GuideView() {
           </ul>
           <Button variant="secondary" onClick={() => openCaptureSheet()} className="mt-4">
             <IconCamera size={16} /> Take a photo
-          </Button>
-        </div>
-        <div className="rounded-[22px] bg-card p-5 shadow-[var(--shadow-card)]">
-          <div className="flex items-center gap-2 text-[16px] font-semibold">
-            <IconVideo size={18} className="text-plants" /> Count a whole row
-          </div>
-          <p className="mt-2 text-sm leading-relaxed text-ink-2">
-            A photo only covers part of a bed. Switch to <b>Row video</b> and walk slowly along one row for about 15 seconds, phone low, without turning back. Every
-            plant gets a number and is counted once.
-          </p>
-          <Button variant="secondary" onClick={() => openCaptureSheet("video")} className="mt-4">
-            <IconVideo size={16} /> Film a row
           </Button>
         </div>
       </section>

@@ -152,7 +152,7 @@ def propose_prompts(llm: LLMClient, image: bytes, crop_label: str, days_after_pl
 
 MAX_SCAN_ITEMS = 8
 
-SCAN_TEMPLATE = """A beginner grower took this top-down photo of their plot. The grower says it grows: {crops}.
+SCAN_TEMPLATE = """A beginner grower took this top-down photo of their plot{age}. The grower says it grows: {crops}.
 List what SAM should search for so that every plant in this photo gets found, one entry per kind of plant that looks different:
 - each crop you can see: one entry, or two if its plants look clearly different (for example small seedlings and large plants);
 - each kind of weed you can see, as separate entries (for example grasses and broadleaf weeds).
@@ -212,9 +212,10 @@ class Scan:
         return asdict(self)
 
 
-def scan_plants(llm: LLMClient, image: bytes, crops: list[str], limit: int = MAX_SCAN_ITEMS) -> Scan:
+def scan_plants(llm: LLMClient, image: bytes, crops: list[str], limit: int = MAX_SCAN_ITEMS, days_after_planting: int | None = None) -> Scan:
     names = [c.lower() for c in crops]
     prompt = SCAN_TEMPLATE.format(
+        age=f", {days_after_planting} days after planting" if days_after_planting is not None else "",
         crops=", ".join(names) or "not told",
         crop_list=" or ".join(f'"{c}"' for c in names) or "its common name",
         limit=limit,

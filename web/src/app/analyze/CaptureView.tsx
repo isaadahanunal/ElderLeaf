@@ -3,17 +3,14 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtDate, PlotDetail, today } from "@/lib/api";
-import { IconCamera, IconEye, IconImage, IconVideo } from "@/components/icons";
-import { BackLink, Button, Card, Chip, ErrorBox, inputClass, Notice, PageHead, Segmented, Spinner } from "@/components/ui";
-
-type Mode = "photo" | "video";
+import { IconCamera, IconEye, IconImage } from "@/components/icons";
+import { BackLink, Button, Card, Chip, ErrorBox, inputClass, Notice, PageHead, Spinner } from "@/components/ui";
 
 export function CaptureView() {
   const params = useSearchParams();
   const plotId = params.get("plot") ?? "";
   const router = useRouter();
   const [plot, setPlot] = useState<PlotDetail | null>(null);
-  const [mode, setMode] = useState<Mode>(params.get("mode") === "video" ? "video" : "photo");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [date, setDate] = useState(today());
@@ -24,7 +21,7 @@ export function CaptureView() {
     if (plotId) api.plot(plotId).then(setPlot, (e) => setError(e.message));
   }, [plotId]);
 
-  const lastPhoto = plot?.analyses.filter((a) => a.mode === "photo" && a.status === "done").at(-1);
+  const lastPhoto = plot?.analyses.filter((a) => a.status === "done").at(-1);
 
   const choose = useCallback((blob: Blob, name: string) => {
     setCamera(false);
@@ -39,7 +36,7 @@ export function CaptureView() {
     setBusy(true);
     setError(null);
     try {
-      const a = await api.upload(plotId, preview.blob, mode, date, preview.name);
+      const a = await api.upload(plotId, preview.blob, date, preview.name);
       router.push(`/analysis?id=${a.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -61,34 +58,6 @@ export function CaptureView() {
           )
         }
       />
-      <div className="mb-6">
-        <Segmented
-          options={[
-            {
-              id: "photo",
-              label: (
-                <>
-                  <IconCamera size={15} /> Photo
-                </>
-              ),
-            },
-            {
-              id: "video",
-              label: (
-                <>
-                  <IconVideo size={15} /> Row video
-                </>
-              ),
-            },
-          ]}
-          value={mode}
-          onChange={(m) => {
-            setMode(m as Mode);
-            setPreview(null);
-            setCamera(false);
-          }}
-        />
-      </div>
 
       {plot?.is_demo && (
         <div className="mb-4">
@@ -101,12 +70,8 @@ export function CaptureView() {
           {preview ? (
             <Card className="fade-in p-3">
               <div className="overflow-hidden rounded-xl bg-black">
-                {mode === "photo" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview.url} alt="Selected photo" className="max-h-[65vh] w-full object-contain" />
-                ) : (
-                  <video src={preview.url} className="max-h-[65vh] w-full" controls playsInline muted />
-                )}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={preview.url} alt="Selected photo" className="max-h-[65vh] w-full object-contain" />
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 p-1">
                 <input type="date" value={date} max={today()} onChange={(e) => setDate(e.target.value)} className={`${inputClass} w-44`} aria-label="Taken on" />
@@ -115,14 +80,14 @@ export function CaptureView() {
                   Retake
                 </Button>
                 <Button onClick={send} disabled={busy || plot?.is_demo} size="lg">
-                  {busy && <Spinner />} {mode === "photo" ? "Analyze photo" : "Count the row"}
+                  {busy && <Spinner />} Analyze photo
                 </Button>
               </div>
             </Card>
           ) : camera ? (
             <LiveCamera ghostUrl={lastPhoto?.image_url} onShot={choose} onClose={() => setCamera(false)} />
           ) : (
-            <DropZone mode={mode} onPick={choose} onCamera={mode === "photo" ? () => setCamera(true) : undefined} />
+            <DropZone onPick={choose} onCamera={() => setCamera(true)} />
           )}
           {error && (
             <div className="mt-4">
@@ -133,22 +98,14 @@ export function CaptureView() {
 
         <div className="space-y-4">
           <Card>
-            <div className="mb-4 text-[15px] font-bold">{mode === "photo" ? "Tips for a good photo" : "How to film a row"}</div>
+            <div className="mb-4 text-[15px] font-bold">Tips for a good photo</div>
             <div className="space-y-3">
-              {(mode === "photo"
-                ? [
-                    ["Same spot", "Shoot from a fixed stake or stone every time."],
-                    ["From above", "Phone flat, about 1–1.5 m over the plants."],
-                    ["A4 sheet", "Put one in the frame to get sizes in cm²."],
-                    ["Soft light", "Avoid harsh sun and your own shadow."],
-                  ]
-                : [
-                    ["Slow walk", "About 15 seconds along one row."],
-                    ["Phone low", "5–12 plants in view at a time."],
-                    ["One way", "Don’t turn back or zig-zag."],
-                    ["Whole row", "Start before the first plant, stop after the last."],
-                  ]
-              ).map(([t, d], i) => (
+              {[
+                ["Same spot", "Shoot from a fixed stake or stone every time."],
+                ["From above", "Phone flat, about 1–1.5 m over the plants."],
+                ["A4 sheet", "Put one in the frame to get sizes in cm²."],
+                ["Soft light", "Avoid harsh sun and your own shadow."],
+              ].map(([t, d], i) => (
                 <div key={t} className="flex gap-3">
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-soft text-[13px] font-bold text-brand">{i + 1}</span>
                   <div>
@@ -159,7 +116,7 @@ export function CaptureView() {
               ))}
             </div>
           </Card>
-          {mode === "photo" && lastPhoto && (
+          {lastPhoto && (
             <Card className="p-3">
               <div className="relative overflow-hidden rounded-xl">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -175,11 +132,11 @@ export function CaptureView() {
   );
 }
 
-function DropZone({ mode, onPick, onCamera }: { mode: Mode; onPick: (b: Blob, name: string) => void; onCamera?: () => void }) {
+function DropZone({ onPick, onCamera }: { onPick: (b: Blob, name: string) => void; onCamera?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const shootRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
-  const accept = mode === "photo" ? "image/*" : "video/*";
+  const accept = "image/*";
   const take = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) onPick(f, f.name);
@@ -190,7 +147,7 @@ function DropZone({ mode, onPick, onCamera }: { mode: Mode; onPick: (b: Blob, na
     e.preventDefault();
     setOver(false);
     const f = e.dataTransfer.files?.[0];
-    if (f && f.type.startsWith(mode === "photo" ? "image/" : "video/")) onPick(f, f.name);
+    if (f && f.type.startsWith("image/")) onPick(f, f.name);
   }
 
   return (
@@ -208,19 +165,17 @@ function DropZone({ mode, onPick, onCamera }: { mode: Mode; onPick: (b: Blob, na
       <span className="relative grid h-24 w-24 place-items-center">
         <span className="breathe absolute inset-0 rounded-full bg-gold/25" />
         <span className="relative grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-brand to-forest text-[#f9ecdb] shadow-[var(--shadow-lift)]">
-          {mode === "photo" ? <IconCamera size={34} /> : <IconVideo size={34} />}
+          <IconCamera size={34} />
         </span>
       </span>
-      <p className="font-display mt-5 text-[26px] font-semibold">{mode === "photo" ? "Snap your plot" : "Film one row"}</p>
-      <p className="mt-1 max-w-xs text-sm text-muted">
-        {mode === "photo" ? "From above, the whole bed in frame. Or drop a photo here (JPG, PNG, HEIC)." : "Walk slowly along one row, phone low, about 15 s. Or drop a video here (MP4, MOV)."}
-      </p>
+      <p className="font-display mt-5 text-[26px] font-semibold">Snap your plot</p>
+      <p className="mt-1 max-w-xs text-sm text-muted">From above, the whole bed in frame. Or drop a photo here (JPG, PNG, HEIC).</p>
       {/* capture= opens the phone camera directly (Android app and mobile browsers); desktops fall back to a file picker */}
       <input ref={shootRef} type="file" accept={accept} capture="environment" className="hidden" onChange={take} />
       <input ref={fileRef} type="file" accept={accept} className="hidden" onChange={take} />
       <div className="mt-6 flex w-full max-w-sm flex-col gap-2 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center">
         <Button size="lg" onClick={() => shootRef.current?.click()}>
-          {mode === "photo" ? <IconCamera size={17} /> : <IconVideo size={17} />} {mode === "photo" ? "Take photo" : "Record video"}
+          <IconCamera size={17} /> Take photo
         </Button>
         {onCamera && (
           <Button size="lg" variant="secondary" onClick={onCamera}>
@@ -228,7 +183,7 @@ function DropZone({ mode, onPick, onCamera }: { mode: Mode; onPick: (b: Blob, na
           </Button>
         )}
         <Button size="lg" variant="secondary" onClick={() => fileRef.current?.click()}>
-          <IconImage size={17} /> {mode === "photo" ? "From gallery" : "From files"}
+          <IconImage size={17} /> From gallery
         </Button>
       </div>
     </div>

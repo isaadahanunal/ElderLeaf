@@ -54,12 +54,12 @@ class Analysis(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("a"))
     plot_id: Mapped[str] = mapped_column(ForeignKey("plots.id", ondelete="CASCADE"), index=True)
+    # always "photo"; rows from the removed row-video feature say "video" and the API hides them
     mode: Mapped[str] = mapped_column(String(16), default="photo")
     captured_at: Mapped[date] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|running|done|failed
-    image_key: Mapped[str] = mapped_column(String(255))  # the photo, or a still frame of the video
-    video_key: Mapped[str | None] = mapped_column(String(255))
+    image_key: Mapped[str] = mapped_column(String(255))
     image_width: Mapped[int | None] = mapped_column(Integer)
     image_height: Mapped[int | None] = mapped_column(Integer)
     trace: Mapped[list] = mapped_column(JSON, default=list)
@@ -135,7 +135,9 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
 # Columns added after tables may already exist (create_all never alters a table).
-_ADDED_COLUMNS = {"plots": {"mixed": "BOOLEAN DEFAULT FALSE", "other_crops": "JSON"}}
+_ADDED_COLUMNS = {
+    "plots": {"mixed": "BOOLEAN DEFAULT FALSE", "other_crops": "JSON"},
+}
 
 
 def _add_missing_columns() -> None:
@@ -152,7 +154,7 @@ def _add_missing_columns() -> None:
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
-    _add_missing_columns()
+    _add_missing_columns()  # databases made before mixed beds (e.g. the Supabase one)
     if engine.dialect.name == "postgresql":
         # Supabase publishes the public schema through its REST API. Row level security with no policies
         # closes that door: only this server, which owns the tables, can read them (password hashes included).
