@@ -23,7 +23,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install_from_pyproject(str(HERE / "pyproject.toml"))
     .env({"SAM_CACHE_DIR": "/cache/sam", "LLM_CACHE_DIR": "/cache/llm", "JOB_MODE": "thread"})
-    .add_local_python_source("elderleaf")
+    .add_local_python_source("elderleaf", ignore=["**/__pycache__/**"])  # all files: crops.py reads crop_library.json
 )
 
 cache = modal.Volume.from_name("elderleaf-cache", create_if_missing=True)
