@@ -181,6 +181,11 @@ def _plot_fields(plot: Plot, request: Request) -> dict:
     }
 
 
+def _report_markdown(a: Analysis, result: AnalysisResult) -> str:
+    """The report page, rendered from the stored numbers each time, so older analyses get the current layout."""
+    return report_agent.render_markdown(result, a.plot.name, _plot_label(a.plot))
+
+
 def _analysis_out(a: Analysis, request: Request) -> AnalysisOut:
     base = str(request.base_url).rstrip("/")
     steps = []
@@ -189,6 +194,9 @@ def _analysis_out(a: Analysis, request: Request) -> AnalysisOut:
         if step.tool == "run_sam" and step.input and step.status == "done":
             step.image_url = f"{base}/analyses/{a.id}/sam.png?prompt={quote(step.input)}"
         steps.append(step)
+    result = AnalysisResult.model_validate(a.result) if a.result else None
+    if result is not None and result.report is not None:
+        result.report.markdown = _report_markdown(a, result)
     return AnalysisOut(
         id=a.id,
         plot_id=a.plot_id,
@@ -198,7 +206,7 @@ def _analysis_out(a: Analysis, request: Request) -> AnalysisOut:
         image_url=_image_url(request, a.image_key),
         overlay_url=f"{base}/analyses/{a.id}/overlay.png" if a.result else None,
         trace=steps,
-        result=AnalysisResult.model_validate(a.result) if a.result else None,
+        result=result,
     )
 
 
@@ -435,14 +443,11 @@ def analysis_overlay(analysis_id: str, db: Session = Depends(get_db)) -> Respons
 
 @app.get("/analyses/{analysis_id}/report.md", response_class=Response)
 def analysis_report(analysis_id: str, db: Session = Depends(get_db)) -> Response:
-    """The single combined report (measurements, health, change, water need, next steps, agent steps)."""
+    """The single combined report (measurements, health, change, water need, next steps)."""
     analysis = _analysis_or_404(db, analysis_id)
     if not analysis.result:
         raise HTTPException(409, "Analysis is not finished yet.")
-    markdown = (analysis.result.get("report") or {}).get("markdown")
-    if not markdown:  # analyses made before the report agent existed
-        result = AnalysisResult.model_validate(analysis.result)
-        markdown = report_agent.render_markdown(result, analysis.plot.name, crop_label(analysis.plot.crop))
+    markdown = _report_markdown(analysis, AnalysisResult.model_validate(analysis.result))
     return Response(markdown, media_type="text/markdown; charset=utf-8")
 
 

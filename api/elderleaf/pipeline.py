@@ -30,7 +30,7 @@ from .crops import FALLBACK_PROMPT, crop_info, crop_label, crop_prompt
 from .db import Analysis, Note, SessionLocal, User
 from .irrigation import water_need
 from .llm import LLMClient, LLMResult
-from .masks import clean_instances, instance_iou, merge_duplicates, resolve_cross_class
+from .masks import clean_instances, drop_on_top_of, instance_iou, merge_duplicates, resolve_cross_class
 from .health import coverage_on_crop, measure_color
 from .metrics import compute_metrics, find_scale, image_quality, mask_polygons
 from .prompting import Attempt, Chain, build_candidates, run_chains, sam_cost, sam_latency
@@ -485,6 +485,11 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     # The grower told us the crop(s), so when a weed phrase also matched a crop plant the crop wins
     # (on 6 PhenoBench images this cut the plant-count error from 8.2 to 3.5 for the agent).
     weed = resolve_cross_class({"crop": crop, "weed": weed}, priority=["crop", "weed"])["weed"]
+    # A weed mask lying mostly on crop plants is a part of one (e.g. single lettuce leaves found by
+    # "grassy weed blade"); IoU above misses it because a leaf is a small part of the plant's mask.
+    weeds_found = len(weed)
+    weed = drop_on_top_of(weed, crop, h, w)
+    weeds_on_crop = weeds_found - len(weed)
     lesion, spots_share = None, None
     if segs.get("lesion") is not None:  # only spots that sit on crop plants count
         found = clean_instances(segs["lesion"].instances, h * w, thr, min_area_frac=0.0)
@@ -519,7 +524,8 @@ def _analyze(db: Session, analysis: Analysis, tracer: Tracer) -> AnalysisResult:
     m = compute_metrics(crop, weed, lesion, h, w, px_per_cm2, discolored=color.pop("discolored_mask", None))
     tracer.done(
         step,
-        f"{m['plant_count']} plants. Crop cover {m['canopy_cover_pct']:g}% of the photo, weeds {m['weed_share_pct']:g}% of the green.",
+        f"{m['plant_count']} plants. Crop cover {m['canopy_cover_pct']:g}% of the photo, weeds {m['weed_share_pct']:g}% of the green."
+        + (f" Skipped {weeds_on_crop} weed find{'s' if weeds_on_crop > 1 else ''} that sat on your crop plants." if weeds_on_crop else ""),
     )
 
     by_crop = None

@@ -252,11 +252,9 @@ class AnalysisResult(BaseModel):
     health: Health
     context: list[ContextItem]
     comparison: Comparison | None
-    irrigation: Irrigation | dict | None = Field(default=None, description="dict: analyses made before the report agent")
-    report: Report | None = None
-    # analyses made before the report agent (still shown in the logbook)
-    crop_info: dict | None = Field(default=None, description="FAO-56 stage, Kc, expected cover")
-    summary: Summary | None = Field(default=None, description="plain-language summary, now part of `report`")
+    crop_info: dict | None = Field(default=None, description="lookup_crop_info: FAO-56 stage, Kc, expected cover")
+    irrigation: dict | None = Field(default=None, description="water need today (FAO-56 × Open-Meteo ET0); `available` false with a `reason` when it can't be estimated")
+    summary: Summary | None = Field(default=None, description="the report agent's short summary and next step (also in `report`)")
     notes_since_previous: list[dict] = []
     report: Report | None = Field(default=None, description="the report agent's combined report (GET /analyses/{id}/report.md)")
     run_stats: RunStats | None = None

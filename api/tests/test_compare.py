@@ -44,15 +44,14 @@ def with_agent(llm, fn):
 def test_compare_two_dates(client):  # noqa: F811
     plot_id, first, second = two_photos(client)
     out = client.get(f"/plots/{plot_id}/compare", params={"a": second, "b": first}).json()  # any order
-    assert out["a"]["id"] == first and out["b"]["id"] == second
-    assert out["days_between"] == 5
+    assert out["before"]["analysis_id"] == first and out["after"]["analysis_id"] == second
+    assert out["days_between"] == 5 and out["after"]["overlay_url"].endswith("/overlay.png")
     rows = {r["metric"]: r for r in out["rows"]}
-    assert rows["plant_count"]["a"] == rows["plant_count"]["b"] == 5
+    assert rows["plant_count"]["before"] == rows["plant_count"]["after"] == 5
     cover = rows["canopy_cover_pct"]
-    assert cover["delta"] > 0 and cover["per_day"] == round(cover["delta"] / 5, 2)
-    assert [n["kind"] for n in out["notes_between"]] == ["watering"]
-    summary = out["summary"]
-    assert summary["source"] == "template" and "In 5 days" in summary["text"] and "1 note" in summary["text"]
+    assert cover["change"] > 0 and cover["per_day"] == round(cover["change"] / 5, 2)
+    assert [n["kind"] for n in out["notes"]] == ["watering"]
+    assert out["written_by"] == "template" and "In 5 days" in out["summary"] and "1 note" in out["summary"]
 
 
 def test_compare_summary_by_agent_is_validated(client):  # noqa: F811
@@ -60,26 +59,27 @@ def test_compare_summary_by_agent_is_validated(client):  # noqa: F811
     good = SummaryLLM({"summary": "Your lettuce has grown and covers more of the bed; the watering you logged may have helped.",
                        "next_step": "Keep the same watering rhythm."})
     out = with_agent(good, lambda: client.get(f"/plots/{plot_id}/compare", params={"a": first, "b": second}).json())
-    assert out["summary"]["source"] == "agent" and out["summary"]["next_step"] == "Keep the same watering rhythm."
+    assert out["written_by"] == "agent" and out["next_step"] == "Keep the same watering rhythm."
     content = good.requests[0][1]["content"]
     assert [part["type"] for part in content] == ["text", "image_url", "image_url"]  # facts + both photos
     assert '"notes_between"' in content[0]["text"]
     # the agent's text is kept: the same pair again costs nothing
     again = with_agent(good, lambda: client.get(f"/plots/{plot_id}/compare", params={"a": first, "b": second}).json())
-    assert again["summary"] == out["summary"] and len(good.requests) == 1
+    assert again["summary"] == out["summary"] and again["written_by"] == "agent" and len(good.requests) == 1
 
     plot_id, first, second = two_photos(client)
     invented = SummaryLLM({"summary": "Cover tripled to 90% in a week.", "next_step": None})
     out = with_agent(invented, lambda: client.get(f"/plots/{plot_id}/compare", params={"a": first, "b": second}).json())
-    assert out["summary"]["source"] == "template" and len(invented.requests) == 2
-    assert any("number 90" in i for i in out["summary"]["validator_issues"])
+    assert out["written_by"] == "template" and len(invented.requests) == 2
+    assert any("number 90" in i for i in out["validator"]["issues"])
 
 
-def test_compare_mixed_bed_has_rows_per_crop(client):  # noqa: F811
+def test_compare_mixed_bed_has_plants_per_crop(client):  # noqa: F811
     plot_id, first, second = two_photos(client, crop="tomato", mixed=True, other_crops=["lettuce"])
-    rows = {r["metric"]: r for r in client.get(f"/plots/{plot_id}/compare", params={"a": first, "b": second}).json()["rows"]}
-    assert rows["plant_count:tomato"]["label"] == "Plants (tomato)" and rows["plant_count:tomato"]["b"] == 5
-    assert rows["plant_count:lettuce"]["b"] == 0
+    out = client.get(f"/plots/{plot_id}/compare", params={"a": first, "b": second}).json()
+    by_crop = {c["crop"]: c for c in out["by_crop"]}
+    assert by_crop["tomato"]["label"] == "Tomato" and by_crop["tomato"]["after"] == 5
+    assert by_crop["lettuce"]["after"] == 0
 
 
 def test_compare_rejects_bad_pairs(client):  # noqa: F811

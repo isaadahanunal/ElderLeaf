@@ -14,9 +14,9 @@ import { Sheet } from "./Sheet";
 
 export { PLOTS_CHANGED };
 
-/** Opens the "which plot?" sheet (bottom tab camera button, home hero, guide), for a photo or a row video. */
-export function openCaptureSheet(mode: "photo" | "video" = "photo") {
-  window.dispatchEvent(new CustomEvent(OPEN_CAPTURE, { detail: { mode } }));
+/** Opens the "which plot?" sheet (bottom tab camera button, home hero, guide). */
+export function openCaptureSheet() {
+  window.dispatchEvent(new CustomEvent(OPEN_CAPTURE));
 }
 
 /** Opens the "New plot" sheet from anywhere. */
@@ -207,12 +207,10 @@ function TabBar() {
 function CaptureSheet() {
   const [open, setOpen] = useState(false);
   const [plots, setPlots] = useState<Plot[] | null>(null);
-  const [mode, setMode] = useState<"photo" | "video">("photo");
   const pathname = usePathname();
 
   useEffect(() => {
     const show = (e: Event) => {
-      setMode((e as CustomEvent<{ mode?: "photo" | "video" }>).detail?.mode === "video" ? "video" : "photo");
       setOpen(true);
       api.plots().then(
         (all) => setPlots(all.filter((p) => !p.is_demo)),
@@ -247,7 +245,7 @@ function CaptureSheet() {
         <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-line sm:hidden" />
         <div className="flex items-center justify-between">
           <div>
-            <div className="font-display text-[22px] font-semibold">{mode === "video" ? "Film a row in which plot?" : "Which plot?"}</div>
+            <div className="font-display text-[22px] font-semibold">Which plot?</div>
             <div className="text-[13px] text-muted">Pick the plot you are standing at.</div>
           </div>
           <button onClick={() => setOpen(false)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-full bg-well text-ink-2">
@@ -264,7 +262,7 @@ function CaptureSheet() {
             </div>
           )}
           {plots?.map((p) => (
-            <Link key={p.id} href={`/analyze?plot=${p.id}${mode === "video" ? "&mode=video" : ""}`} className="flex items-center gap-3 rounded-2xl bg-well p-2.5 pr-3.5 transition hover:bg-[#ece9e1] active:scale-[0.99]">
+            <Link key={p.id} href={`/analyze?plot=${p.id}`} className="flex items-center gap-3 rounded-2xl bg-well p-2.5 pr-3.5 transition hover:bg-[#ece9e1] active:scale-[0.99]">
               <span className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-line">
                 {p.latest && (
                   // eslint-disable-next-line @next/next/no-img-element

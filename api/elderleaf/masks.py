@@ -77,6 +77,31 @@ def resolve_cross_class(
     return out
 
 
+def drop_on_top_of(
+    instances: list[Instance], cover: list[Instance], height: int, width: int, max_share: float = 0.5
+) -> list[Instance]:
+    """Drop the masks that lie mostly (more than `max_share` of their pixels) on the `cover` masks.
+
+    resolve_cross_class compares whole masks (IoU), so it misses a part of a plant found as a separate
+    object: a weed phrase like "grassy weed blade" finds single leaves of a lettuce, and one leaf is only
+    5-30% of the plant's mask (IoU under 0.5) although it sits entirely on it.
+    """
+    if not instances or not cover:
+        return instances
+    union = np.zeros((height, width), dtype=bool)
+    for c in cover:
+        x0, y0, x1, y1 = c.box
+        union[y0:y1, x0:x1] |= c.mask
+    kept = []
+    for inst in instances:
+        x0, y0, x1, y1 = inst.box
+        area = int(inst.mask.sum())
+        on_cover = int(np.logical_and(union[y0:y1, x0:x1], inst.mask).sum())
+        if not area or on_cover / area <= max_share:
+            kept.append(inst)
+    return kept
+
+
 def class_map(
     by_class: dict[int, list[Instance]], height: int, width: int, priority: list[int] | None = None
 ) -> np.ndarray:

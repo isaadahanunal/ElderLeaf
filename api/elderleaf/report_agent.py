@@ -613,8 +613,7 @@ def render_markdown(result: AnalysisResult, plot_name: str, crop_label: str) -> 
     md += ["", "## Photo quality", "", f"{q.level}: sharpness {_fmt(q.blur)}, brightness {_fmt(q.brightness)}, {_fmt(q.clipped_pct)}% burned-out pixels."]
     if rep and rep.next_steps:
         md += ["", "## Next steps", ""] + [f"{i}. {s}" for i, s in enumerate(rep.next_steps, start=1)]
-    md += ["", "## How this report was made", ""]
-    md += [f"{s.step}. {s.label}" + (f" ({s.input})" if s.input else "") + (f": {s.result}" if s.result else "") for s in r.agent_trace]
+    # the agent's steps are on screen next to the report ("How this was measured"), so the report only says who wrote it
     if rep:
         who = "Muse Spark wrote the text; a validator checked every number against the measurements" if rep.written_by == "agent" else \
               "Text from ElderLeaf's templates (the AI writer was off or did not pass the checks)"
